@@ -1,0 +1,24 @@
+# dependencies
+/node_modules
+
+# build output
+/dist
+
+# vercel local metadata
+/.vercel
+
+# local env / secrets (API keys for serverless functions live in the host's env)
+.env
+.env.local
+.env.*.local
+
+# pipeline scratch (raw caches are not committed; baked output in public/data IS)
+scripts/pipeline/raw/
+scripts/pipeline/_*cache*.json
+__pycache__/
+*.pyc
+.venv/
+
+# misc
+.DS_Store
+npm-debug.log*

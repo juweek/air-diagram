@@ -1,0 +1,29 @@
+{
+  "name": "air-quality-react",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "What's in the Air — a live p5.js air-particle diagram (ZIP or city lookup), built on the Gourmet Data template.",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.24.0",
+    "p5": "2.3.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router-dom": "6.30.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.7.0",
+    "autoprefixer": "10.5.0",
+    "postcss": "8.5.15",
+    "prettier": "3.8.4",
+    "prettier-plugin-tailwindcss": "0.6.14",
+    "tailwindcss": "3.4.19",
+    "vite": "5.4.21"
+  }
+}
