@@ -83,15 +83,29 @@ export default function AirPage() {
 
   return (
     <div>
-      <p className="mb-5 mt-1 max-w-prose text-ink-muted">
-        The green “Good” badge hides two things: a legal line that’s far looser than the health
-        line, and what’s actually in a breath. Search a place to see its air drawn particle by
-        particle.
-      </p>
+      {/* ── Editorial hero. The glitch texture bleeds from the top edge and
+         fades into the ground (Style-2 "1c"); the italic serif headline sits
+         over it, then the thesis, search and scenario links. ────────────── */}
+      <section className="relative -mt-2 mb-8 pt-6">
+        <div className="glitch-texture" aria-hidden />
+        <div className="relative">
+          <p className="label-caps mb-4">— A brief reckoning —</p>
+          <h2 className="font-display text-4xl italic leading-[1.05] text-ink-bright sm:text-6xl">
+            What’s actually
+            <br />
+            in the air.
+          </h2>
+          <p className="mb-6 mt-5 max-w-prose font-display text-lg leading-relaxed text-ink-muted">
+            The green “Good” badge hides two things: a legal line that’s far looser than the health
+            line, and what’s actually in a breath. Search a place to see its air drawn particle by
+            particle.
+          </p>
 
-      <LookupInput defaultValue={query} onSubmit={(q) => navigate(`/${encodeURIComponent(q)}`)} />
+          <LookupInput defaultValue={query} onSubmit={(q) => navigate(`/${encodeURIComponent(q)}`)} />
 
-      <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
+          <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
+        </div>
+      </section>
 
       {state.status === 'loading' && <Loading label={`Looking up ${query}…`} />}
       {state.status === 'error' && <ErrorState message={state.error} />}
@@ -115,6 +129,11 @@ export default function AirPage() {
             ) : (
               <div className="w-full max-w-[560px] flex-1 basis-[420px]">
                 <P5Sketch sketch={airParticleSketch} data={sketchData} />
+                {hasResult && view === 'source' && (
+                  <p className="label-caps mt-2 text-center">
+                    drag to orbit · scroll or pinch to zoom
+                  </p>
+                )}
               </div>
             )}
             <aside className="w-full flex-1 basis-[260px]">
@@ -142,15 +161,15 @@ export default function AirPage() {
    Each just navigates to /:id — the scenario is a real, shareable address. ── */
 function ScenarioBar({ active, onPick }) {
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-      <span className="text-ink-muted">Or compare a scenario:</span>
+    <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
+      <span className="label-caps">Or a scenario</span>
       {SCENARIOS.map((s) => (
         <button
           key={s.id}
           type="button"
           onClick={() => onPick(s.id)}
-          className={`rounded-full border-[1.5px] border-ink px-3 py-1 font-semibold transition-colors ${
-            active === s.id ? 'bg-black text-cream' : 'bg-white/60 text-ink hover:bg-white'
+          className={`label-caps border-b pb-0.5 transition-colors ${
+            active === s.id ? '!text-ink-bright border-current' : 'border-transparent hover:!text-ink'
           }`}
         >
           {s.label}
@@ -217,7 +236,7 @@ function Segmented({ label, value, onChange, options }) {
             type="button"
             onClick={() => onChange(opt.value)}
             className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
-              value === opt.value ? '!bg-black !text-cream' : 'bg-white/60 text-ink hover:bg-white'
+              value === opt.value ? '!bg-ink !text-cream' : 'text-ink-muted hover:!text-ink'
             }`}
           >
             {opt.label}
@@ -331,8 +350,16 @@ function Readout({ result, view, mode, hidden, onToggle, source }) {
   const category = aqiCategory(displayAqi);
 
   return (
-    <div className="max-h-[560px] overflow-y-auto rounded-xl border-[1.5px] border-grid-strong bg-white/50 p-5">
-      <h3 className="font-title text-xl">{location.name}</h3>
+    // The cap tracks the diagram beside it: the pollutant view stacks two ring
+    // canvases (~2× as tall as the single source canvas), so its readout gets
+    // more room before scrolling. Fixed px, not vh — see the preview quirk in
+    // CLAUDE.md.
+    <div
+      className={`${
+        view === 'rings' ? 'max-h-[820px]' : 'max-h-[560px]'
+      } overflow-y-auto rounded-lg border border-grid-strong bg-cream/60 p-5`}
+    >
+      <h3 className="font-display text-2xl italic">{location.name}</h3>
 
       <AqiMeter aqi={displayAqi} category={category} />
       {measured ? (
@@ -449,17 +476,17 @@ function AqiMeter({ aqi, category }) {
               y1={GAUGE.cy}
               x2={nx.toFixed(2)}
               y2={ny.toFixed(2)}
-              stroke="#383838"
+              stroke="#f6efe0"
               strokeWidth="3"
               strokeLinecap="round"
             />
-            <circle cx={GAUGE.cx} cy={GAUGE.cy} r="5.5" fill="#383838" />
+            <circle cx={GAUGE.cx} cy={GAUGE.cy} r="5.5" fill="#f6efe0" />
           </>
         )}
-        <text x={GAUGE.cx - GAUGE.r} y={GAUGE.cy + 16} textAnchor="middle" fontSize="9" fill="#9a938f">
+        <text x={GAUGE.cx - GAUGE.r} y={GAUGE.cy + 16} textAnchor="middle" fontSize="9" fill="#a8987e">
           0
         </text>
-        <text x={GAUGE.cx + GAUGE.r} y={GAUGE.cy + 16} textAnchor="middle" fontSize="9" fill="#9a938f">
+        <text x={GAUGE.cx + GAUGE.r} y={GAUGE.cy + 16} textAnchor="middle" fontSize="9" fill="#a8987e">
           500
         </text>
       </svg>
@@ -607,7 +634,7 @@ function LegendRow({ entry, off, onToggle, rose, children }) {
       type="button"
       onClick={() => onToggle(entry.key)}
       aria-pressed={!off}
-      className={`grid w-full grid-cols-[14px_12px_1fr_auto] items-center gap-2 rounded py-0.5 text-left text-sm transition-opacity hover:bg-white/60 ${
+      className={`grid w-full grid-cols-[14px_12px_1fr_auto] items-center gap-2 rounded py-0.5 text-left text-sm transition-colors hover:bg-ink/10 ${
         off ? 'opacity-40' : ''
       } ${rose ? 'text-rose' : ''}`}
     >
@@ -643,7 +670,9 @@ function PollutantList({ current }) {
         {POLLUTANTS.map((def) => {
           const value = current[def.key];
           if (value == null) return null;
-          const hex = def.color.slice(0, 7);
+          // Same hex the ring diagram draws with — the dot, bars and ring all
+          // cross-reference by colour.
+          const hex = def.color;
           return (
             <li key={def.key} className="text-sm">
               <div className="flex items-baseline justify-between gap-2">
@@ -670,35 +699,27 @@ function PollutantList({ current }) {
   );
 }
 
-// A single "reading ÷ reference line" bar. Fills to the line; turns red and
-// reads the exact multiple once the reading is at or over it.
+// A single "reading ÷ reference line" bar. Fills toward the line; a full bar
+// plus the multiple at right means the reading is at or past it. The bar keeps
+// the pollutant's own colour so it cross-references the ring diagram directly.
 function MiniLine({ label, ratio, color }) {
-  const over = ratio >= 1;
   const pct = Math.min(ratio, 1) * 100;
   const text = ratio >= 0.1 ? `${ratio.toFixed(1)}×` : '<0.1×';
   return (
     <div className="grid grid-cols-[3.5rem_1fr_2.2rem] items-center gap-1.5 text-[10px] leading-tight">
       <span className="uppercase tracking-wide text-ink-muted">{label}</span>
       <span className="block h-1.5 min-w-0 overflow-hidden rounded-full bg-grid-medium">
-        <span
-          className="block h-full rounded-full"
-          style={{ width: `${pct}%`, background: over ? '#D6392F' : color }}
-        />
+        <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
       </span>
-      <span
-        className="text-right font-semibold tabular-nums"
-        style={over ? { color: '#D6392F' } : undefined}
-      >
-        {text}
-      </span>
+      <span className="text-right font-semibold tabular-nums">{text}</span>
     </div>
   );
 }
 
 function BaselineNote() {
   return (
-    <div className="rounded-xl border-[1.5px] border-grid-strong bg-white/50 p-5">
-      <h3 className="font-title text-xl">Baseline: Earth’s atmosphere</h3>
+    <div className="rounded-lg border border-grid-strong bg-cream/60 p-5">
+      <h3 className="font-display text-2xl italic">Baseline: Earth’s atmosphere</h3>
       <p className="mt-2 leading-relaxed text-ink-muted">
         Right now you’re looking at clean air by composition — nitrogen, oxygen, argon, CO₂, neon,
         and trace gases. Search a place above and the diagram redraws using its current pollutant

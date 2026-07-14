@@ -11,7 +11,9 @@
 // 1-hour) so these are illustrative reference lines, not a compliance
 // calculation — see the notes below.
 //
-// Colors reuse the palette from the original atmosphere diagram.
+// Colours are luminous-on-dark (Style-2 charcoal canvas): each pollutant keeps a
+// distinct hue, bright enough to glow as a ring orb and to read as a legend dot
+// / bar fill. 6-digit hex — the additive glow supplies its own soft falloff.
 export const POLLUTANTS = [
   {
     key: 'pm2_5',
@@ -21,7 +23,7 @@ export const POLLUTANTS = [
     range: [0, 40],
     who: 5, // WHO annual guideline
     legal: 9, // EPA annual NAAQS (2024; was 12)
-    color: '#2A2A28F2',
+    color: '#E6D3A0',
     centered: true,
   },
   {
@@ -32,7 +34,7 @@ export const POLLUTANTS = [
     range: [0, 60],
     who: 45, // WHO 24-hour
     legal: 150, // EPA 24-hour NAAQS
-    color: '#BD9B18AA',
+    color: '#D9A93E',
     semiCentered: true,
   },
   {
@@ -43,7 +45,7 @@ export const POLLUTANTS = [
     range: [20, 180],
     who: 100, // WHO 8-hour
     legal: 137, // EPA 8-hour NAAQS (0.070 ppm ≈ 137 µg/m³)
-    color: '#221DD76D',
+    color: '#6FA6FF',
   },
   {
     key: 'nitrogen_dioxide',
@@ -53,7 +55,7 @@ export const POLLUTANTS = [
     range: [0, 60],
     who: 25, // WHO 24-hour
     legal: 188, // EPA 1-hour NAAQS (100 ppb ≈ 188 µg/m³)
-    color: '#E41919B0',
+    color: '#F0665F',
   },
   {
     key: 'sulphur_dioxide',
@@ -63,7 +65,7 @@ export const POLLUTANTS = [
     range: [0, 20],
     who: 40, // WHO 24-hour
     legal: 196, // EPA 1-hour NAAQS (75 ppb ≈ 196 µg/m³)
-    color: '#08A0108E',
+    color: '#5FD08A',
   },
   {
     key: 'carbon_monoxide',
@@ -73,7 +75,7 @@ export const POLLUTANTS = [
     range: [50, 600],
     who: 4000, // WHO 24-hour (4 mg/m³)
     legal: 40000, // EPA 1-hour NAAQS (35 ppm ≈ 40 mg/m³)
-    color: '#D45D9E6D',
+    color: '#E68AC9',
   },
   {
     key: 'dust',
@@ -83,7 +85,7 @@ export const POLLUTANTS = [
     range: [0, 25],
     who: 45, // no dust-specific guideline; borrow PM10 24-hour
     legal: 150,
-    color: '#B56515AA',
+    color: '#D98A44',
   },
 ];
 

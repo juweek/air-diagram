@@ -2,99 +2,196 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Brand base. Warm cream canvas everywhere — never pure white (brand rule). */
+/* ── :root — design tokens ───────────────────────────────────────────────────
+   THE ONE PLACE THAT DEFINES THE LOOK. Everything else (Tailwind semantic
+   colours in tailwind.config.js, the components, the p5 sketch) reads from
+   these. To ship a different design in this family, change these values —
+   don't touch the components. Colours are raw "R G B" triples so Tailwind can
+   apply opacity through them (rgb(var(--x) / <alpha>)).
+
+   This is "Style 2 — dark editorial serif", dusk-gradient variant. */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --ground: 31 28 25; /* #1f1c19 warm near-black — panels, canvas floor */
+  --ground-lift: 42 37 32; /* #2a2520 a touch lifted — glass cards */
+
+  /* Text tiers, warm sand */
+  --sand: 217 205 184; /* #d9cdb8 body */
+  --sand-bright: 246 239 224; /* #f6efe0 headlines */
+  --sand-muted: 168 152 126; /* #a8987e labels / meta */
+
+  /* Hairlines */
+  --hairline: 55 49 42; /* #37312a faint rules / tracks */
+  --hairline-strong: 74 68 60; /* #4a443c dividers / borders */
+
+  /* Accent — links, active states (warm amber) */
+  --accent: 217 161 92; /* #d9a15c */
+
+  /* The ground atmosphere: a SUBTLE warm-charcoal gradient — the prototype's
+     near-black, just lifted a touch at the top and deepened at the bottom for
+     texture. No blue. The glitch texture does the rest of the work. */
+  --dusk: linear-gradient(180deg, #26221c 0%, #1f1c19 46%, #17140f 100%);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
 @layer base {
   html,
   body {
-    background-color: #f7f0ef;
-    color: #383838;
-    font-family: 'Avenir', 'Nunito Sans', system-ui, sans-serif;
+    background-color: #1f1c19; /* fallback under the gradient */
+    color: rgb(var(--sand));
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* The ground gradient is a fixed layer so content scrolls over one continuous
+     surface rather than repainting it per section. Pinned behind everything.
+     (No background-attachment: fixed — position:fixed already pins it, and the
+     attachment form forces a costly repaint on every scroll frame.) */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--dusk);
   }
 
   h1,
   h2,
   h3 {
-    font-family: 'Avenir Black', 'Avenir', 'Nunito Sans', sans-serif;
-    font-weight: 900;
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 500;
+    color: rgb(var(--sand-bright));
+    letter-spacing: -0.01em;
+  }
+
+  a {
+    color: rgb(var(--accent));
+  }
+  a:hover {
+    color: rgb(var(--sand-bright));
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.35);
+    color: rgb(var(--sand-bright));
   }
 }
 
-/* ── gourmetMediaContainer convention ────────────────────────────────────────
-   Ported from the gourmetDataInteractives HTML embeds (see the *copy.html
-   files / chordDiagramInteractive, streamGraphFoodSpending, sodaDiagram).
-   The look: an outer card with a 2px ink border and a HARD offset drop
-   shadow (no blur — it's a print-style shadow), a big question-style h2,
-   and an inner .graphArea band with an inset shadow that owns the per-view
-   title, subhead, the graphic itself, and the centered source line at the
-   bottom. Colors come from the brand palette (ink #383838, warm cream) —
-   the originals' #333/#F7F3F1, translated to this template's tokens. */
+/* ── Editorial helpers ───────────────────────────────────────────────────── */
+@layer components {
+  /* Tracked uppercase micro-label — nav, eyebrows, control captions. */
+  .label-caps {
+    font-family: system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgb(var(--sand-muted));
+  }
+
+  /* The glitch texture: a vertical-bar field bleeding from the top edge and
+     fading into the ground — the Style-2 "1c" hero treatment. Pure CSS, so it
+     costs nothing to animate-free render. Bars are an unevenly striped
+     repeating gradient; the mask fades them out toward the bottom. */
+  .glitch-texture {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgb(var(--sand) / 0.14) 0px,
+      rgb(var(--sand) / 0.14) 1px,
+      transparent 1px,
+      transparent 4px,
+      rgb(var(--sand) / 0.07) 4px,
+      rgb(var(--sand) / 0.07) 5px,
+      transparent 5px,
+      transparent 11px
+    );
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 78%);
+    mask-image: linear-gradient(180deg, #000 0%, transparent 78%);
+  }
+}
+
+/* ── gourmetMediaContainer — dark editorial skin ─────────────────────────────
+   The shared "chart card" convention, retuned for the dusk world: the hard
+   print-shadow becomes a translucent glass panel with a sand hairline, so the
+   dusk gradient reads faintly through it. Structure/class names are unchanged
+   so the convention still carries across the project. */
 
 .gourmetMediaContainer {
   position: relative;
-  border: 2px solid #383838;
-  box-shadow: 5px 4px 0 #383838;
-  background-color: #f7f0ef;
-  color: #383838;
-  padding: 20px;
+  border: 1px solid rgb(var(--hairline-strong));
+  border-radius: 4px;
+  /* Near-opaque instead of translucent-with-blur: backdrop-filter over the
+     fixed gradient was repainting the whole card every frame (the main cause of
+     the sluggishness). A solid panel is free. */
+  background-color: rgb(var(--ground-lift) / 0.92);
+  color: rgb(var(--sand));
+  padding: 24px;
   margin: 20px 0;
 }
 
-/* The big question title. The originals run 3–4rem; inline <select>s are
-   allowed inside it (font-size: inherit) for mad-libs style titles. */
 .gourmetMediaContainer > h2 {
-  font-size: 2.5rem;
-  line-height: 1.2;
-  font-weight: 900;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 500;
+  font-style: italic;
+  color: rgb(var(--sand-bright));
   margin: 0 0 4px;
 }
 
 .gourmetMediaContainer .containerIntro {
   display: block;
-  font-family: 'Averia Sans Libre', Georgia, serif;
+  font-family: 'Fraunces', Georgia, serif;
   font-size: 16px;
   line-height: 24px;
+  color: rgb(var(--sand-muted));
   margin: 0 0 10px;
 }
 
-/* Controls row — dashed rule below it separates controls from the graphic. */
+/* Controls row — hairline rule below, tokens throughout. */
 .gourmetMediaContainer .buttonsDiv {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  border-bottom: 2px dashed #383838;
-  padding-bottom: 10px;
-  margin-bottom: 10px;
+  border-bottom: 1px solid rgb(var(--hairline-strong));
+  padding-bottom: 12px;
+  margin-bottom: 12px;
 }
 
+/* Editorial toggles: text tabs, not filled chips. Active = brighter sand +
+   underline (handled by the .active / utility classes on the button). */
 .gourmetMediaContainer .buttonsDiv button {
   margin-right: 4px;
   margin-bottom: 6px;
-  font-size: 1.05em;
+  font-size: 0.95em;
   border-radius: 100px;
   padding: 4px 12px;
   background: transparent;
-  color: #383838;
-  border: 1px solid #383838;
+  color: rgb(var(--sand-muted));
+  border: 1px solid rgb(var(--hairline-strong));
 }
 
 .gourmetMediaContainer .buttonsDiv button:hover,
 .gourmetMediaContainer .buttonsDiv button.active {
-  background-color: #383838;
-  color: #f7f0ef;
+  background-color: rgb(var(--sand));
+  color: rgb(var(--ground));
 }
 
-/* The chunky dropdown — native chrome stripped, custom chevron. */
 .gourmetMediaContainer .selectButton {
-  font-family: inherit;
-  font-weight: 900;
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 500;
   font-size: 1.5rem;
   padding: 4px 44px 4px 8px;
   border: 0;
-  color: #383838;
-  background-color: #e5dbd9;
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%23383838' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
+  color: rgb(var(--sand-bright));
+  background-color: rgb(var(--ground-lift));
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23d9cdb8' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 32px;
@@ -103,43 +200,44 @@
   appearance: none;
 }
 
-/* The inner graphic band: per-view title + subhead + graphic + source all
-   live in here, on a slightly darker panel with an inset shadow. */
+/* The inner graphic band — the "deep space" the particle field floats in.
+   Darker than the card so the luminous orbs pop against it. */
 .gourmetMediaContainer .graphArea {
   position: relative;
-  border: 2px solid #383838;
-  background-color: #eae3e1;
-  box-shadow: inset 0 0 3px #383838;
+  border: 1px solid rgb(var(--hairline));
+  border-radius: 3px;
+  background-color: rgb(var(--ground));
   padding: 20px 10px;
   margin: 10px 0;
   text-align: center;
 }
 
 .gourmetMediaContainer .graphTitle {
+  font-family: 'Fraunces', Georgia, serif;
   font-size: 1.25rem;
-  font-weight: 900;
+  font-weight: 500;
+  color: rgb(var(--sand-bright));
   margin: 0;
 }
 
 .gourmetMediaContainer .graphSubhead {
   display: block;
-  font-family: 'Averia Sans Libre', Georgia, serif;
+  font-family: 'Fraunces', Georgia, serif;
   font-size: 0.9rem;
+  color: rgb(var(--sand-muted));
   margin: 0 0 8px;
 }
 
-/* Source line — always block-level, centered, pinned at the bottom of the
-   graph area. */
 .gourmetMediaContainer .graphSource {
   display: block;
   text-align: center;
   font-size: 0.8rem;
   margin-top: 8px;
-  color: #5a5a5a;
+  color: rgb(var(--sand-muted));
 }
 
 .gourmetMediaContainer .graphSource a {
-  color: #3266ad;
+  color: rgb(var(--accent));
   text-decoration: underline;
 }
 
@@ -148,19 +246,15 @@
   max-width: 100%;
 }
 
-/* Mobile: outer card sheds the box treatment (full-bleed embeds), and the
-   inner graph band picks up the offset shadow instead. */
+/* Mobile: card sheds its frame for full-bleed embeds; the graph band keeps its
+   hairline so the field still reads as a contained "window". */
 @media (max-width: 768px) {
   .gourmetMediaContainer {
     border: 0;
-    border-top: 1px solid #383838;
-    border-bottom: 1px solid #383838;
-    box-shadow: none;
+    border-top: 1px solid rgb(var(--hairline-strong));
+    border-bottom: 1px solid rgb(var(--hairline-strong));
+    border-radius: 0;
     padding: 8px;
-  }
-
-  .gourmetMediaContainer .graphArea {
-    box-shadow: 3px 2px 0 #383838;
   }
 
   .gourmetMediaContainer .selectButton {

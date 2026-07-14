@@ -290,7 +290,7 @@ function ModeToggle({ mode, onMode }) {
             type="button"
             onClick={() => onMode(o.value)}
             className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
-              mode === o.value ? '!bg-black !text-cream' : 'bg-white/60 text-ink hover:bg-white'
+              mode === o.value ? '!bg-ink !text-cream' : 'text-ink-muted hover:!text-ink'
             }`}
           >
             {o.label}

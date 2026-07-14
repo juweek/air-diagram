@@ -1,45 +1,48 @@
 /**
- * Tailwind palette = the Gourmet Data brand, mirrored so utility classes
- * (bg-cream, text-ink, bg-data-primary …) stay in sync with the chart engine
- * in src/lib/brandChart.jsx. brandChart.jsx is the source of truth for CHARTS,
- * this file is the source of truth for PAGE CHROME. Both trace back to
- * brand-graph-style.md. Keep the hex values identical in both files.
+ * Tailwind palette. The semantic tokens (cream/ink/grid…) intentionally keep
+ * their original NAMES but now resolve to CSS custom properties defined in
+ * src/index.css (see the ":root — design tokens" block there). That indirection
+ * is the whole point: the entire page reskins by editing that one token block,
+ * so a new design in this family is a theme swap, not a component rewrite.
+ *
+ * Each colour is written in the `rgb(var(--x) / <alpha-value>)` form so opacity
+ * utilities (bg-cream/40, text-ink-muted/70 …) keep working through the variable.
  */
 /** @type {import('tailwindcss').Config} */
+const token = (name) => `rgb(var(${name}) / <alpha-value>)`;
+
 export default {
   content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Canvas — warm cream, never pure white (brand rule)
-        cream: '#F7F0EF',
-        ink: '#383838',
-        'ink-muted': '#5A5A5A',
-        rose: '#E08484', // the brand mark
-        // "Data" palette (default)
+        // Ground / surfaces (was the light "cream" canvas).
+        cream: token('--ground'),
+        'ground-lift': token('--ground-lift'),
+        // Text tiers (was near-black "ink").
+        ink: token('--sand'),
+        'ink-muted': token('--sand-muted'),
+        'ink-bright': token('--sand-bright'),
+        rose: '#E0A46A', // warm brand mark, tuned into the dusk palette
+        // Accents — links / active states.
         data: {
-          primary: '#3266AD',
-          accent: '#BA7517',
+          primary: token('--accent'),
+          accent: token('--sand-bright'),
         },
-        // "Soft" palette (stacked / categorical)
-        soft: {
-          olive: '#5C764E',
-          sage: '#8CAF78',
-          'dusty-rose': '#D09594',
-          coral: '#E08484',
-        },
+        // Hairlines / tracks (was light greys).
         grid: {
-          strong: '#CDCDCD',
-          medium: '#DDDDDD',
-          light: '#EEEEEE',
+          strong: token('--hairline-strong'),
+          medium: token('--hairline'),
+          light: token('--hairline'),
         },
       },
       fontFamily: {
-        // Full fallback stacks so it degrades gracefully where Avenir/Averia
-        // are not installed (brand-graph-style.md §2).
-        title: ['Avenir Black', 'Avenir', 'Nunito Sans', 'sans-serif'],
-        subtitle: ['Averia Sans Libre', 'Georgia', 'serif'],
-        body: ['Avenir', 'Nunito Sans', 'system-ui', 'sans-serif'],
+        // Editorial serif for display + poetic lines; neutral system sans for
+        // tracked-uppercase labels and running body copy.
+        title: ['Fraunces', 'Georgia', 'serif'],
+        subtitle: ['Fraunces', 'Georgia', 'serif'],
+        display: ['Fraunces', 'Georgia', 'serif'],
+        body: ['system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
       },
     },
   },

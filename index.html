@@ -4,14 +4,16 @@
     <meta charset="utf-8" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#F7F0EF" />
+    <meta name="theme-color" content="#1f1c19" />
     <meta name="description" content="An air particle diagram that re-renders based on live air quality. Search a ZIP code or city, then flip between the legal line and the WHO health line to see the same air fill with specks." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Averia Sans Libre = the brand subtitle face (free, Google Fonts).
-         Avenir is a system face with a declared fallback stack. -->
+    <!-- Fraunces = the editorial display serif (free, Google Fonts) — used large
+         and often italic for the poetic lines. Labels/nav fall back to system-ui.
+         Weights pinned (no optical-size axis) to keep the font file small and the
+         first paint fast; display=swap so text never blocks on it. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Averia+Sans+Libre:wght@400;700&family=Nunito+Sans:wght@400;600;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap"
       rel="stylesheet"
     />
     <title>What's in the Air — a particle diagram</title>

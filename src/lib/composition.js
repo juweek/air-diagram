@@ -14,20 +14,24 @@ import { PM25_LINES } from './pollutants.js';
 // The visible fraction of a breath, by source. Sizes are rough draw radii in
 // px; ultrafine is deliberately the smallest and is tracked separately because
 // it lives outside the regulated mass number.
+// Colours are luminous-on-dark: on the Style-2 charcoal canvas the particles are
+// drawn as additive glow, so a near-black soot would vanish. Each keeps its
+// hue's meaning (smoke = warm ash, haze = cool blue, wildfire = purple, …) but
+// bright enough to read both as a glowing orb and as a legend swatch.
 export const SOURCES = [
-  { key: 'soot', label: 'Combustion soot', color: '#2A2A28', size: [2, 4] },
-  { key: 'brake', label: 'Road & brake dust', color: '#B56515', size: [4, 7] },
-  { key: 'haze', label: 'Sulfate & nitrate haze', color: '#8FA3C4', size: [3, 5] },
-  { key: 'wildfire', label: 'Wildfire char', color: '#8F3F97', size: [3, 6] },
+  { key: 'soot', label: 'Combustion soot', color: '#CBBDA6', size: [2, 4] },
+  { key: 'brake', label: 'Road & brake dust', color: '#DE9440', size: [4, 7] },
+  { key: 'haze', label: 'Sulfate & nitrate haze', color: '#8FB2E6', size: [3, 5] },
+  { key: 'wildfire', label: 'Wildfire char', color: '#C06BCB', size: [3, 6] },
   // bio currently draws 0 specks — no measured proxy exists for it (see
   // composition() below) and zero must mean zero. Kept for a future pollen feed.
-  { key: 'bio', label: 'Pollen & biological', color: '#3B9C46', size: [5, 9] },
+  { key: 'bio', label: 'Pollen & biological', color: '#6BD08F', size: [5, 9] },
 ];
 
 export const ULTRAFINE = {
   key: 'ultrafine',
   label: 'Ultrafine — never counted',
-  color: '#D6392F',
+  color: '#F0584A',
   size: [1, 2],
 };
 
