@@ -1,7 +1,8 @@
-import { POLLUTANTS } from '../lib/pollutants.js';
+import { POLLUTANTS, pollutantNorm } from '../lib/pollutants.js';
 import {
   SOURCES,
   ULTRAFINE,
+  AIR_GASES,
   particleBreakdown,
   pollutantAbundance,
 } from '../lib/composition.js';
@@ -10,11 +11,12 @@ import {
  * The air-particle diagram, as a pure p5 sketch: airParticleSketch(p, data).
  * No global mode, no controller — P5Sketch.jsx owns mount/teardown and re-runs
  * this whenever `data` changes. `data = { current, view, mode, hidden }`:
- *   view: 'baseline' | 'source' | 'pollutants' | 'rings'
- *         baseline   = Earth's clean breath (N₂/O₂/Ar rings)
- *         source     = 3D field of MODELED PM2.5 origins
- *         pollutants = measured species: gases as soft haze, PM as orbs
- *         rings      = concentric rings of the breath's source mix
+ *   view: 'baseline' | 'source' | 'pollutants' | 'breathRings' | 'breathScale'
+ *         baseline    = Earth's clean breath (N₂/O₂/Ar rings)
+ *         source      = 3D field of MODELED PM2.5 origins
+ *         pollutants  = measured species: gases as soft haze, PM as orbs
+ *         breathRings = N₂/O₂/Ar as big outer rings around a tiny pollution core
+ *         breathScale = two stacked zones: the breath, then its pollution zoomed
  *   mode: 'legal' | 'who' | 'current'        (which reference / scale)
  *   current: the Open-Meteo `current` readings (null in baseline view)
  *   sky: null | [top, mid, horizon] RGB triples (lib/sky.js) — when set, the
@@ -88,11 +90,15 @@ function glowSprite(color) {
 // not a box. Wraps: leaving the wall re-enters at the opposite side (at the
 // antipode the same velocity points back inward), height wraps top↔bottom.
 class Speck3D {
-  constructor(color, radius, field, { haze = false } = {}) {
+  constructor(color, radius, field, { haze = false, opacity = 1 } = {}) {
     this.color = color;
     this.radius = radius;
     this.field = field;
     this.haze = haze; // soft gas puff (few, large, dim) vs particle orb
+    // Thickness of the smoke: 1 for particle orbs, and for gas haze a factor
+    // from how concentrated that gas actually is (denser gas = thicker, more
+    // opaque smoke). Multiplied into the haze alpha in drawSource3D.
+    this.opacity = opacity;
     // sqrt() for uniform density over the disc footprint.
     const a = Math.random() * Math.PI * 2;
     const rr = Math.sqrt(Math.random()) * field.r;
@@ -136,9 +142,9 @@ const SOURCE_BY_KEY = Object.fromEntries(
 // same "what's in a breath" ring language as the pollution source rings, but
 // for N₂/O₂/Ar instead of soot/haze. Labels feed the hover tooltip.
 const BASELINE_LAYERS = [
-  { value: 78, color: '#D45D9E', label: 'Nitrogen (N₂) · 78% of a clean breath' },
-  { value: 21, color: '#5B6BE8', label: 'Oxygen (O₂) · 21%' },
-  { value: 0.93, color: '#38C46A', centered: true, label: 'Argon (Ar) · 0.93%' },
+  { value: 78, color: '#57B36F', label: 'Nitrogen (N₂) · 78% of a clean breath' },
+  { value: 21, color: '#5B8DEF', label: 'Oxygen (O₂) · 21%' },
+  { value: 0.93, color: '#9AA0A6', centered: true, label: 'Argon (Ar) · 0.93%' },
   { value: 0.04, color: '#E86A6A', semiCentered: true, label: 'Carbon dioxide (CO₂) · 0.04%' },
   { value: 0.0018, color: '#E0C24A', semiCentered: true, label: 'Neon (Ne) · trace' },
   { value: 0.0262, color: '#B9AE97', semiCentered: true, label: 'Other trace gases' },
@@ -154,6 +160,7 @@ export function airParticleSketch(p, data) {
 
   let kind = 'baseline'; // 'baseline' | 'rings' | 'source'
   let organics = [];
+  let zoneLabels = []; // on-canvas zone captions (breathScale only)
   let specks = []; // Speck3D[] (source view only)
   let field = null; // the 3D volume half-extents
   let change = 0;
@@ -262,6 +269,7 @@ export function airParticleSketch(p, data) {
   function buildBaseline() {
     kind = 'baseline';
     organics = [];
+    zoneLabels = [];
     specks = [];
     change = 0;
     pulseSpeed = BASE_PULSE_SPEED * 0.65;
@@ -297,18 +305,12 @@ export function airParticleSketch(p, data) {
     });
   }
 
-  // Breath-ring view: one concentric ring per MODELED source in the pollution
-  // sliver — the same split as BreathBars / SourceLegend. Density ∝ that
-  // source's share of the PM2.5 mass (ultrafine is an extra estimated swarm).
-  // Dot size follows each source's relative particle size. Hidden legend rows
-  // drop their ring.
-  function buildRings(c) {
-    kind = 'rings';
-    organics = [];
-    specks = [];
-    change = 0;
-    pulseSpeed = pulseFromAqi(c);
-
+  // The MODELED source rings for the pollution sliver — the same split as
+  // BreathBars / SourceLegend. Returns concentric ring layers within [innerR,
+  // outerR] around (cx, cy). Density ∝ each source's share of the PM2.5 mass;
+  // ultrafine is an extra estimated swarm. Hidden legend rows drop their ring.
+  // Shared by both breath views (as the "pollution" they zoom into).
+  function pollutionRings(c, cx, cy, innerR, outerR, baseDot) {
     const breakdown = particleBreakdown(c, mode === 'who' ? 'who' : 'legal');
     const layers = [];
     for (const key of RING_SOURCE_ORDER) {
@@ -324,35 +326,111 @@ export function airParticleSketch(p, data) {
     }
 
     const n = layers.length || 1;
-    const maxR = p.width * 0.34;
-    const spacing = maxR / n;
+    const spacing = (outerR - innerR) / n;
     const band = spacing * 0.28;
-    const baseDot = Math.max(3.5, p.width / 65);
-    const innerR = spacing * 0.45;
-
+    const out = [];
     layers.forEach(({ entry, count, pct }, i) => {
-      const ringRadius = innerR + spacing * i;
-      const pulse = p.constrain(ringRadius * 0.14, 3, spacing * 0.5);
+      const ringRadius = innerR + spacing * (i + 0.5);
+      const pulse = p.constrain(ringRadius * 0.14, 2, spacing * 0.5);
       // Map source size[] (draw radii) onto ring dots — ultrafine smallest.
       const sizeMid = (entry.size[0] + entry.size[1]) / 2;
       const dot = Math.max(2, baseDot * (sizeMid / 3.2));
       const label =
         pct != null
-          ? `${entry.label} · ${pct}% of the PM2.5 mass`
-          : `${entry.label} · estimated (not in the mass number)`;
-      const organic = new Organic(ringRadius, p.width / 2, p.height / 2, entry.color, {
-        band,
-        dot,
-        pulse,
-        label,
-      });
+          ? `${entry.label} · ${pct}% of the PM2.5 mass (drawn far larger than true scale)`
+          : `${entry.label} · estimated, not in the mass number`;
+      const organic = new Organic(ringRadius, cx, cy, entry.color, { band, dot, pulse, label });
       // Count already tracks the source share — keep a floor so tiny % still
       // reads as a thin ring, and a ceiling so one dominant source doesn't
-      // fill the canvas solid.
-      const numParticles = Math.round(p.constrain(count * 1.05, 18, 360));
-      organic.generateParticles(numParticles);
-      organics.push(organic);
+      // fill the canvas solid. Kept deliberately sparse: in the breath views the
+      // clean-gas swarms should overwhelm this pollution core, so the pollution
+      // rings get far fewer dots than the gas rings.
+      organic.generateParticles(Math.round(p.constrain(count * 0.55, 8, 140)));
+      out.push(organic);
     });
+    return out;
+  }
+
+  // N₂/O₂/Ar as concentric rings within [innerR, outerR], sized to true ratio
+  // TO EACH OTHER (area ∝ %, so the argon ring is honestly thin). Shared by both
+  // breath views as "the breath" the pollution hides inside.
+  function breathGasRings(cx, cy, innerR, outerR, baseDot, { labelSuffix = 'of a breath' } = {}) {
+    const stepW = AIR_GASES.map((g) => Math.sqrt(g.pct));
+    const stepSum = stepW.reduce((a, b) => a + b, 0) || 1;
+    const out = [];
+    let r = innerR;
+    AIR_GASES.forEach((g, i) => {
+      const step = (stepW[i] / stepSum) * (outerR - innerR);
+      const ringRadius = r + step;
+      const band = step * 0.3;
+      const pulse = p.constrain(step * 0.18, 2, step * 0.45);
+      // Dense clean-gas swarms on purpose: the whole point of the breath views
+      // is how overwhelmingly N₂/O₂/Ar outnumber the pollution core, so the gas
+      // rings get many more dots than the pollution ones. Floor keeps the thin
+      // argon ring a real swarm.
+      const num = Math.max(60, Math.round(p.map(g.pct, 0, 78, 110, 560)));
+      const pctLabel = g.pct >= 1 ? `${Math.round(g.pct)}%` : `${g.pct}%`;
+      const organic = new Organic(ringRadius, cx, cy, g.color, {
+        band,
+        dot: baseDot,
+        pulse,
+        label: `${g.full} (${g.short}) · ${pctLabel} ${labelSuffix}`,
+      });
+      organic.generateParticles(num);
+      out.push(organic);
+      r = ringRadius;
+    });
+    return out;
+  }
+
+  // breathRings view (Option A): the bulk gases as big outer rings wrapped
+  // around a tiny pollution core. The core holds the WHOLE modeled source mix,
+  // drawn far larger than true scale (the UI discloses this) so the <0.01%
+  // pollution sliver is visible at all against the 99.99% clean gas.
+  function buildBreathRings(c) {
+    kind = 'rings';
+    organics = [];
+    zoneLabels = [];
+    specks = [];
+    change = 0;
+    pulseSpeed = pulseFromAqi(c);
+
+    const cx = p.width / 2;
+    const cy = p.height / 2;
+    const maxR = p.width * 0.36;
+    const coreR = maxR * 0.22; // reserved inner disc for the exaggerated pollution
+    const baseDot = Math.max(2.4, p.width / 82);
+
+    organics.push(...breathGasRings(cx, cy, coreR, maxR, baseDot));
+    organics.push(...pollutionRings(c, cx, cy, coreR * 0.12, coreR, Math.max(2, baseDot * 0.85)));
+  }
+
+  // breathScale view (Option C): two stacked zones. Top = a breath (N₂/O₂/Ar to
+  // true ratio); bottom = that breath's pollution sliver, zoomed into its source
+  // mix. The particle version of the two-bar BreathBars chart — the ×zoom
+  // between the zones is the disclosed exaggeration.
+  function buildBreathScale(c) {
+    kind = 'rings';
+    organics = [];
+    zoneLabels = [];
+    specks = [];
+    change = 0;
+    pulseSpeed = pulseFromAqi(c);
+
+    const cx = p.width / 2;
+    const topCy = p.height * 0.26;
+    const botCy = p.height * 0.79;
+    const clusterR = p.width * 0.165;
+    const baseDot = Math.max(2.2, p.width / 92);
+
+    organics.push(...breathGasRings(cx, topCy, clusterR * 0.12, clusterR, baseDot));
+    organics.push(...pollutionRings(c, cx, botCy, clusterR * 0.16, clusterR, Math.max(2, baseDot * 1.1)));
+
+    const cap = Math.max(11, p.width / 46);
+    zoneLabels = [
+      { text: 'A breath — 99.99% clean gas', x: cx, y: p.height * 0.045, size: cap },
+      { text: '↓ the pollution in it, zoomed ↓', x: cx, y: p.height * 0.525, size: cap * 0.92 },
+    ];
   }
 
   // Shared setup for both 3D field views: reset state, size the volume, then
@@ -363,6 +441,7 @@ export function airParticleSketch(p, data) {
   function fill3DField(c, groups) {
     kind = 'source';
     organics = [];
+    zoneLabels = [];
     specks = [];
     agitation = clamp(p.map(c.us_aqi ?? 0, 0, 300, 0.5, 2.5), 0.5, 2.5);
     field = { r: p.width * 0.92, ry: p.width * 0.7 };
@@ -383,7 +462,7 @@ export function airParticleSketch(p, data) {
       const count = v.haze ? v.count : Math.round(v.count * keep);
       for (let i = 0; i < count; i++) {
         const radius = v.size[0] + Math.random() * (v.size[1] - v.size[0]);
-        specks.push(new Speck3D(v.color, radius, field, { haze: !!v.haze }));
+        specks.push(new Speck3D(v.color, radius, field, { haze: !!v.haze, opacity: v.opacity ?? 1 }));
       }
     }
   }
@@ -406,6 +485,9 @@ export function airParticleSketch(p, data) {
 
   // Pollutant field: gases as soft haze puffs, PM/dust as particle orbs.
   // Colors match POLLUTANTS / the readout list. Perf: ≤ ~40 haze blits/frame.
+  // A gas's smoke gets THICKER — more puffs, bigger, more opaque — the more
+  // concentrated it actually is (pollutantNorm over that gas's typical urban
+  // range), so a wisp of CO reads differently from a wall of ozone.
   function buildPollutants(c) {
     const HAZE_PUFFS = typeof window !== 'undefined' && window.innerWidth < 700 ? 28 : 40;
     const abundance = pollutantAbundance(c);
@@ -414,10 +496,15 @@ export function airParticleSketch(p, data) {
       const def = POLLUTANT_BY_KEY[a.key];
       if (!def) continue;
       if (a.kind === 'gas' || def.form === 'gas') {
+        // 0 = barely there, ~1 = a high day for this gas. Drives puff count,
+        // size and opacity together so density reads as concentration.
+        const thickness = pollutantNorm(def, c[def.key] ?? 0); // 0..1.25
+        const bulk = 0.6 + thickness; // 0.6 (wisp) → ~1.85 (thick)
         groups.push({
           color: def.color,
-          size: [14, 28],
-          count: Math.max(a.share > 0.02 ? 2 : 0, Math.round(a.share * HAZE_PUFFS)),
+          size: [14 * (0.75 + thickness * 0.5), 28 * (0.75 + thickness * 0.5)],
+          count: Math.max(a.share > 0.02 ? 2 : 0, Math.round(a.share * HAZE_PUFFS * (0.7 + thickness * 0.6))),
+          opacity: bulk,
           haze: true,
         });
       } else {
@@ -491,9 +578,10 @@ export function airParticleSketch(p, data) {
         if (px + d < 0 || px - d > p.width || py + d < 0 || py - d > p.height) continue;
 
         const fade = clamp((denom - nearLimit) / (f * 0.1), 0, 1);
-        // Nearer = brighter; haze stays dim so it reads as dissolved air.
+        // Nearer = brighter; haze stays dim so it reads as dissolved air, but a
+        // more concentrated gas (s.opacity) makes its smoke thicker and darker.
         ctx.globalAlpha = s.haze
-          ? Math.min(0.18, 0.1 * scale) * fade
+          ? Math.min(0.32, 0.1 * s.opacity * scale) * fade
           : Math.min(1, 0.55 * scale) * fade;
         ctx.drawImage(glowSprite(s.color), px - d / 2, py - d / 2, d, d);
       }
@@ -562,22 +650,23 @@ export function airParticleSketch(p, data) {
     if (is3D) {
       if (view === 'pollutants') buildPollutants(current);
       else buildSource(current);
-    } else if (view === 'rings' && current) buildRings(current);
+    } else if (view === 'breathRings' && current) buildBreathRings(current);
+    else if (view === 'breathScale' && current) buildBreathScale(current);
     else buildBaseline();
   }
 
-  // Which ring (if any) is under the cursor. Rings are concentric around the
-  // canvas centre, so the test is just |mouse distance − ring radius| within
-  // the ring's particle band.
+  // Which ring (if any) is under the cursor. Rings are concentric around each
+  // organic's own centre (breathScale stacks two centres), so the test is
+  // |mouse distance from that centre − ring radius| within the particle band.
   function hoveredRing() {
     const mx = mouse.x;
     const my = mouse.y;
     if (mx < 0 || mx > p.width || my < 0 || my > p.height) return null;
-    const d = Math.hypot(mx - p.width / 2, my - p.height / 2);
     let best = null;
     let bestErr = Infinity;
     for (const o of organics) {
       if (!o.label) continue;
+      const d = Math.hypot(mx - o.xpos, my - o.ypos);
       const tol = o.centered ? o.radius / 3 + o.dot : o.band + o.dot;
       const err = Math.abs(d - o.hitRadius());
       if (err <= tol && err < bestErr) {
@@ -675,6 +764,19 @@ export function airParticleSketch(p, data) {
         organics[i].show(change);
       }
       ctx.globalAlpha = 1;
+      // Zone captions (breathScale): drawn over the fields so the two stacked
+      // clusters read as "a breath" and "its pollution, zoomed".
+      if (zoneLabels.length) {
+        p.push();
+        p.noStroke();
+        p.textAlign(p.CENTER, p.CENTER);
+        for (const zl of zoneLabels) {
+          p.textSize(zl.size);
+          p.fill(198, 190, 174); // --sand-muted, quiet against the fields
+          p.text(zl.text, zl.x, zl.y);
+        }
+        p.pop();
+      }
       change += pulseSpeed;
       p.canvas.style.cursor = hovered ? 'crosshair' : 'default';
       if (hovered) drawRingTooltip(hovered);

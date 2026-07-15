@@ -161,6 +161,197 @@ function featureCenter(geometry) {
   return best ? ringCenter(best) : null;
 }
 
+// ── Value choropleths (actual live AQI, not just coverage) ──────────────────
+//
+// These color the map by the NEAREST monitor's live AQI category, then FADE
+// that color toward the charcoal background as the county gets farther from a
+// real reading. The hue answers "what's the nearest measured air like?"; the
+// fade answers "how much should you trust that here?" — the further from a
+// monitor, the fainter, because that's exactly how much of a guess it is.
+//
+// This is deliberately nearest-neighbour + a confidence fade, NOT inverse-
+// distance interpolation (IDW). IDW would blend neighbours into a smooth,
+// confident-looking surface — which is the very illusion this piece exists to
+// puncture. Fading with distance keeps the guesswork visible.
+
+const GROUND_HEX = '#1f1c19'; // the charcoal map floor colours fade toward
+const FADE_MILES = 160; // distance at which a reading is essentially a guess
+const FADE_FLOOR = 0.15; // faintest a far county still shows (never fully gone)
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex([r, g, b]) {
+  const h = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+// Mix a toward b by t (0 = all a, 1 = all b).
+function mixHex(a, b, t) {
+  const ca = hexToRgb(a);
+  const cb = hexToRgb(b);
+  return rgbToHex(ca.map((v, i) => v + (cb[i] - v) * t));
+}
+// Confidence 1 (at a monitor) → FADE_FLOOR (>= FADE_MILES away), linear between.
+function fadeStrength(dist) {
+  const t = Math.max(0, Math.min(dist / FADE_MILES, 1));
+  return FADE_FLOOR + (1 - FADE_FLOOR) * (1 - t);
+}
+// Category color faded toward the background by distance (strength 1 = full).
+function fadedColor(catColor, strength) {
+  return mixHex(catColor, GROUND_HEX, 1 - strength);
+}
+
+// Nearest live monitor to a point: { cat, aqi, dist } (miles), or null if none.
+function nearestSite(lat, lon, sites) {
+  const mpdLon = 69 * Math.cos((lat * Math.PI) / 180);
+  let best = Infinity;
+  let bcat = 0;
+  let baqi = null;
+  for (const s of sites) {
+    const dLat = (lat - s[0]) * 69;
+    const dLon = (lon - s[1]) * mpdLon;
+    const d2 = dLat * dLat + dLon * dLon;
+    if (d2 < best) {
+      best = d2;
+      bcat = s[3];
+      baqi = s[2];
+    }
+  }
+  if (best === Infinity) return null;
+  return { cat: bcat, aqi: baqi, dist: Math.sqrt(best) };
+}
+
+function geomBBox(geometry) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const polys = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  for (const rings of polys) {
+    for (const [px, py] of rings[0]) {
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+  }
+  return { minX, minY, maxX, maxY };
+}
+function geomContains(geometry, x, y) {
+  const polys = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  for (const rings of polys) if (polygonContains(x, y, rings)) return true;
+  return false;
+}
+
+// Grid surface of the nearest monitor's live AQI, faded by distance. Same 0.5°
+// land cells as buildCoverageGrid, but colored by the value story, not coverage.
+// `sites` = [[lat, lon, aqi, cat], …] live readings; `catColor` = { n: hex }.
+export function buildValueGrid(sites, catColor, cell = 0.5) {
+  const features = [];
+  if (!sites?.length) return { type: 'FeatureCollection', features };
+  for (let lon = -125; lon < -66; lon += cell) {
+    for (let lat = 24; lat < 50; lat += cell) {
+      const cx = lon + cell / 2;
+      const cy = lat + cell / 2;
+      if (!onLand(cx, cy)) continue;
+      const near = nearestSite(cy, cx, sites);
+      if (!near || !catColor[near.cat]) continue;
+      const color = fadedColor(catColor[near.cat], fadeStrength(near.dist));
+      features.push({
+        type: 'Feature',
+        properties: { color, cat: near.cat, aqi: near.aqi, miles: Math.round(near.dist) },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [lon, lat],
+              [lon + cell, lat],
+              [lon + cell, lat + cell],
+              [lon, lat + cell],
+              [lon, lat],
+            ],
+          ],
+        },
+      });
+    }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+// County choropleth of the LIVE VALUE. A county that actually contains a live
+// monitor takes that monitor's category at full strength (the worst one if it
+// holds several — AQI is a max, not an average). Every other county borrows its
+// nearest monitor's category, faded by how far that monitor is.
+// `sites` = [[lat, lon, aqi, cat], …]; `catColor` = { n: hex }.
+export async function buildCountyValues(sites, catColor) {
+  const { default: usCounties } = await import('../data/usCounties.json');
+  const features = [];
+  if (!sites?.length) return { type: 'FeatureCollection', features };
+
+  // Precompute each county's bbox + center, then assign each monitor to the one
+  // county that contains it (bbox prefilter keeps this cheap).
+  const counties = usCounties.features.map((f) => ({
+    f,
+    bbox: geomBBox(f.geometry),
+    center: featureCenter(f.geometry),
+    inCat: 0, // worst category of any monitor inside; 0 = none
+    inAqi: null,
+  }));
+  for (const s of sites) {
+    const [lat, lon, aqi, cat] = s;
+    for (const c of counties) {
+      if (lon < c.bbox.minX || lon > c.bbox.maxX || lat < c.bbox.minY || lat > c.bbox.maxY) continue;
+      if (geomContains(c.f.geometry, lon, lat)) {
+        if (cat > c.inCat) {
+          c.inCat = cat;
+          c.inAqi = aqi;
+        }
+        break; // a point lives in exactly one county
+      }
+    }
+  }
+
+  for (const c of counties) {
+    if (!c.center) continue;
+    const [lon, lat] = c.center;
+    let cat;
+    let aqi;
+    let strength;
+    let miles;
+    let inside;
+    if (c.inCat > 0) {
+      cat = c.inCat;
+      aqi = c.inAqi;
+      strength = 1;
+      miles = 0;
+      inside = true;
+    } else {
+      const near = nearestSite(lat, lon, sites);
+      if (!near || !catColor[near.cat]) continue;
+      cat = near.cat;
+      aqi = near.aqi;
+      strength = fadeStrength(near.dist);
+      miles = Math.round(near.dist);
+      inside = false;
+    }
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: fadedColor(catColor[cat], strength),
+        cat,
+        aqi,
+        miles,
+        inside,
+        name: c.f.properties.name,
+        state: c.f.properties.state,
+      },
+      geometry: c.f.geometry,
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 // County choropleth of the same distance story: each county is colored by how
 // far its approximate center sits from the nearest regulatory PM2.5 monitor.
 // Same bands as the grid. Hover properties carry name/state/miles for the popup.

@@ -5,7 +5,7 @@ import { useAsync } from '../lib/useAsync';
 import { getByQuery } from '../data/airQuality';
 import { POLLUTANTS, aqiCategory, aqiGuidance, POLLUTANT_BLURBS } from '../lib/pollutants';
 import { pm25Aqi } from '../lib/nowcast';
-import { SOURCES, ULTRAFINE, particleBreakdown } from '../lib/composition';
+import { SOURCES, ULTRAFINE, AIR_GASES, particleBreakdown } from '../lib/composition';
 import { SCENARIOS } from '../data/scenarios';
 import LookupInput from '../components/LookupInput';
 import GourmetMediaContainer from '../components/GourmetMediaContainer';
@@ -133,7 +133,7 @@ export default function AirPage() {
     () => (showSky && skyCapable ? skyStops(elevation, weather, { afternoon }) : null),
     [showSky, skyCapable, elevation, weather, afternoon]
   );
-  const skyLabel = skyCapable ? skyCaption(elevation, weather, { afternoon }) : null;
+  const skyLabel = skyCapable ? skyCaption(weather) : null;
 
   // Stable objects so each P5Sketch only remounts on a real data change.
   // Source/pollutants/baseline: one canvas. Rings: a single ring canvas for
@@ -142,11 +142,15 @@ export default function AirPage() {
     () => ({ current, view: hasResult ? view : 'baseline', mode: 'legal', hidden, sky }),
     [current, hasResult, view, hidden, sky]
   );
-  const ringsCurrent = useMemo(
-    () => ({ current, view: 'rings', mode: 'legal', hidden }),
-    [current, hidden]
+  // The two "breath" views (bulk rings + core, and the stacked to-scale zones)
+  // are crisp ring diagrams, not the orbitable 3D field — they render in the
+  // smaller centered panel instead of the big canvas.
+  const isBreath = view === 'breathRings' || view === 'breathScale';
+  const breathData = useMemo(
+    () => ({ current, view, mode: 'legal', hidden }),
+    [current, view, hidden]
   );
-  const showRings = hasResult && view === 'rings';
+  const showBreath = hasResult && isBreath;
 
   // One source line under the odometer. Scenarios carry their own; places use
   // the measured monitor sentence when AirNow drives the headline, else CAMS.
@@ -207,12 +211,15 @@ export default function AirPage() {
         >
           {hasResult && state.data.alert && <AlertBanner alert={state.data.alert} />}
           <div className="flex flex-wrap items-start justify-center gap-6 text-left">
-            {showRings ? (
+            {showBreath ? (
               // Extra side padding on phones shrinks the canvas ~10px and leaves
               // a gutter to start a vertical scroll past the drag-to-orbit area.
               <div className="w-full max-w-[560px] flex-1 basis-[420px] px-2.5 sm:px-0">
-                <div className="mx-auto max-w-[340px] rounded-lg bg-cream p-2">
-                  <RingPanel label="What’s in this breath" data={ringsCurrent} />
+                <div className="mx-auto max-w-[360px] rounded-lg bg-cream p-2">
+                  <RingPanel
+                    label={view === 'breathScale' ? 'A breath, to scale' : 'What’s in this breath'}
+                    data={breathData}
+                  />
                 </div>
                 <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
               </div>
@@ -389,10 +396,11 @@ function RingPanel({ label, data }) {
   );
 }
 
-/* ── Controls: the "View" toggle. Three cuts of the same air:
-     • Particulates — modeled PM2.5 origins.
+/* ── Controls: the "View" toggle. Four cuts of the same air:
+     • Particulates — modeled PM2.5 origins (3D field).
      • Pollutants — gases as haze, PM as orbs (matched colors).
-     • What's in a breath of air? — concentric rings of the PM2.5 source mix.
+     • In a breath — N₂/O₂/Ar as big rings around a tiny pollution core.
+     • Breath, to scale — the breath, then its pollution sliver zoomed.
    ─────────────────────────────────────────────────────────────────────────── */
 function Controls({ view, onView }) {
   return (
@@ -400,9 +408,10 @@ function Controls({ view, onView }) {
       value={view}
       onChange={onView}
       options={[
-        { value: 'source', label: 'Particulates' },
-        { value: 'pollutants', label: 'Pollutants' },
-        { value: 'rings', label: "What's in a breath of air?" },
+        { value: 'source', label: 'Particles in the air' },
+        { value: 'pollutants', label: 'Pollutants in the air' },
+        { value: 'breathRings', label: 'In a breath' },
+        { value: 'breathScale', label: 'Breath, to scale' },
       ]}
     />
   );
@@ -677,7 +686,7 @@ function TrendBars({ history, source }) {
       <div className="mb-1">
         <span className="label-caps">PM2.5 · last {series.length} hrs</span>
       </div>
-      <div className="relative flex h-12 items-end gap-px" onMouseLeave={() => setHover(null)}>
+      <div className="relative flex h-9 items-end gap-px" onMouseLeave={() => setHover(null)}>
         {series.map((h, i) => {
           const cat = aqiCategory(pm25Aqi(h.value));
           return (
@@ -980,10 +989,10 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
     }
   }
   if (modelAqi == null && measuredAqi == null) return null;
-  // Zoom the axis to 300 unless a reading actually reaches into the top bands —
-  // most days both bars live under 150, and a fixed 0–500 scale squashed them
-  // into indistinguishable stubs. Only stretch to 500 when something needs it.
-  const top = Math.max(modelAqi ?? 0, measuredAqi ?? 0) > 300 ? AQI_MAX : 300;
+  // Zoom the axis to 200 unless a reading actually reaches past it — most days
+  // both bars live under 150, and a fixed 0–500 scale squashed them into
+  // indistinguishable stubs. Only stretch to the full 500 when something needs it.
+  const top = Math.max(modelAqi ?? 0, measuredAqi ?? 0) > 200 ? AQI_MAX : 200;
 
   return (
     <Section title="What’s been measured?" icon={<IconBars />}>
@@ -1210,7 +1219,7 @@ function gaugeArc(v0, v1) {
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${GAUGE.r} ${GAUGE.r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-function AqiMeter({ aqi, category, focusLabel, onClearFocus }) {
+function AqiMeter({ aqi, category }) {
   // Turn the band spans into cumulative [v0, v1] AQI ranges to draw each arc.
   let cursor = 0;
   const bands = AQI_BANDS.map((b) => {
@@ -1227,17 +1236,6 @@ function AqiMeter({ aqi, category, focusLabel, onClearFocus }) {
           {aqi ?? '—'}
         </span>
         <span className="font-semibold text-ink">{category.name}</span>
-        {/* A focused chip retunes the gauge to that pollutant alone — say so
-           next to the number, with the way back one click away. */}
-        {focusLabel && (
-          <button
-            type="button"
-            onClick={onClearFocus}
-            className="label-caps ml-auto shrink-0 rounded-full border border-grid-strong px-2 py-0.5 transition-colors hover:!border-ink hover:!text-ink"
-          >
-            {focusLabel} only · ✕
-          </button>
-        )}
       </div>
       <svg
         viewBox="0 0 240 140"
@@ -1392,17 +1390,10 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
    width. ─────────────────────────────────────────────────────────────────── */
 const SLIVER_PCT = 0.5; // drawn width of the pollutant sliver — VISUAL ONLY
 
-// The real composition of dry air by volume. N₂/O₂ dominate; argon is a thin
-// but honest ~0.9%; everything else (CO₂, trace gases AND all pollution) is the
-// rest. We draw these to their true proportions and only exaggerate the
-// pollutant sliver — so the bar can't lie about how little of a breath is
-// anything but N₂ and O₂. Nitrogen green (per the brand), oxygen blue, argon a
-// neutral grey.
-const AIR_GASES = [
-  { key: 'n2', label: 'N₂', full: 'Nitrogen', pct: 78.09, color: '#57B36F' },
-  { key: 'o2', label: 'O₂', full: 'Oxygen', pct: 20.95, color: '#5B8DEF' },
-  { key: 'ar', label: 'Ar', full: 'Argon', pct: 0.93, color: '#9AA0A6' },
-];
+// The real composition of dry air by volume (AIR_GASES, shared with the two
+// breath diagrams): N₂/O₂ dominate; argon is a thin but honest ~0.9%. We draw
+// these to their true proportions and only exaggerate the pollutant sliver — so
+// the bar can't lie about how little of a breath is anything but N₂ and O₂.
 const AIR_TOTAL = AIR_GASES.reduce((a, g) => a + g.pct, 0);
 
 function BreathBars({ sources }) {
@@ -1415,11 +1406,11 @@ function BreathBars({ sources }) {
         {AIR_GASES.map((g) => (
           <div
             key={g.key}
-            title={`${g.full} (${g.label}) · ${g.pct}%`}
+            title={`${g.full} (${g.short}) · ${g.pct}%`}
             className="flex items-center justify-center overflow-hidden text-[10px] font-semibold leading-none text-[#1f1c19]"
             style={{ width: `${((100 - SLIVER_PCT) * g.pct) / AIR_TOTAL}%`, background: g.color }}
           >
-            {g.pct >= 5 ? `${g.label} ${Math.round(g.pct)}%` : ''}
+            {g.pct >= 5 ? `${g.short} ${Math.round(g.pct)}%` : ''}
           </div>
         ))}
         <div
@@ -1536,10 +1527,16 @@ function PollutantList({ current, source }) {
           if (value == null) return null;
           const hex = def.color;
           const top = Math.max(value, def.who, def.legal) * 1.05;
-          const overLine = value > def.who || value > def.legal;
-          const cardTint = overLine
+          // Over the US legal line is red; over the WHO health line but still
+          // under legal is yellow (the gap the piece is about); under both is
+          // neutral. Legal is always the looser line, so over-legal ⊆ over-WHO.
+          const overLegal = value > def.legal;
+          const overWhoOnly = value > def.who && !overLegal;
+          const cardTint = overLegal
             ? 'border-[#D6392F]/50 bg-[#D6392F]/[0.10]'
-            : 'border-grid-strong bg-cream/40';
+            : overWhoOnly
+              ? 'border-[#C7A70A]/60 bg-[#C7A70A]/[0.12]'
+              : 'border-grid-strong bg-cream/40';
           const isGas = def.form === 'gas';
           return (
             <li key={def.key} className={`rounded-lg border p-3 text-sm ${cardTint}`}>

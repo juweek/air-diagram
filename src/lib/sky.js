@@ -178,22 +178,11 @@ function wmoLabel(code) {
   return null;
 }
 
-// Phase word when we lack a wall-clock — dawn ≠ dusk via `afternoon`.
-function phaseWord(elevationDeg, afternoon) {
-  const e = elevationDeg;
-  if (e < -12) return 'Night';
-  if (e < -6) return afternoon ? 'Dusk' : 'Dawn';
-  if (e < 3) return afternoon ? 'Sunset' : 'Sunrise';
-  if (e < 12) return afternoon ? 'Golden hour' : 'Golden hour';
-  if (e < 35) return afternoon ? 'Afternoon' : 'Morning';
-  if (e < 55) return afternoon ? 'Late afternoon' : 'Late morning';
-  return 'High noon';
-}
-
 // The place's current wall-clock time, e.g. "3:47 pm", from the UTC offset the
-// weather feed reports. Falls back to a phase-of-day word if we have no offset.
-function localClock(elevationDeg, utcOffsetSec, afternoon) {
-  if (utcOffsetSec == null) return phaseWord(elevationDeg, afternoon);
+// weather feed reports. Null when we have no offset (no phase-word stand-in —
+// the caption shows only time, conditions, and temperature).
+function localClock(utcOffsetSec) {
+  if (utcOffsetSec == null) return null;
   const d = new Date(Date.now() + utcOffsetSec * 1000);
   const h = d.getUTCHours();
   const m = d.getUTCMinutes();
@@ -202,17 +191,13 @@ function localClock(elevationDeg, utcOffsetSec, afternoon) {
   return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-// A one-line "what the sky is doing" caption for the toggle: local clock time,
-// phase when useful, conditions from WMO, temperature.
-// e.g. "12:08 pm · high noon · mostly clear · 83°F"
-export function skyCaption(elevationDeg, weather, opts = {}) {
-  const afternoon = !!opts.afternoon;
-  const parts = [localClock(elevationDeg, weather?.utcOffsetSec, afternoon)];
-  // When we have a clock, still name the phase so noon / dusk read as such.
-  if (weather?.utcOffsetSec != null) {
-    const phase = phaseWord(elevationDeg, afternoon).toLowerCase();
-    if (phase !== 'morning' && phase !== 'afternoon') parts.push(phase);
-  }
+// A one-line caption for the "show sky?" toggle: just the factual readings —
+// local clock time, conditions from WMO, temperature. No phase-of-day words.
+// e.g. "12:08 pm · mostly clear · 83°F"
+export function skyCaption(weather) {
+  const parts = [];
+  const clock = localClock(weather?.utcOffsetSec);
+  if (clock) parts.push(clock);
   const cond = wmoLabel(weather?.code);
   if (cond) parts.push(cond);
   else if (weather?.cloudCover != null) {

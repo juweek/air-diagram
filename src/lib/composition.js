@@ -35,6 +35,18 @@ export const ULTRAFINE = {
   size: [0.7, 1.4],
 };
 
+// The bulk of every breath, by volume. N₂/O₂/Ar are ~99.96% of dry air; all the
+// pollution above is the <0.01% leftover. These are drawn to true ratio TO EACH
+// OTHER — the pollution sliver is the part that has to be exaggerated to be
+// visible at all (disclosed in the UI, never implied as data). Colors: nitrogen
+// green, oxygen blue, argon a neutral grey — shared by the two "breath" diagrams
+// and the BreathBars chart so the same gas is the same color everywhere.
+export const AIR_GASES = [
+  { key: 'n2', short: 'N₂', full: 'Nitrogen', pct: 78.09, color: '#57B36F' },
+  { key: 'o2', short: 'O₂', full: 'Oxygen', pct: 20.95, color: '#5B8DEF' },
+  { key: 'ar', short: 'Ar', full: 'Argon', pct: 0.93, color: '#9AA0A6' },
+];
+
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 const map = (v, a, b, c, d) => c + ((v - a) / (b - a)) * (d - c);
 

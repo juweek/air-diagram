@@ -4,7 +4,15 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import GourmetMediaContainer from '../components/GourmetMediaContainer';
 import monitors from '../data/pm25Monitors.json';
 import usStates from '../data/usStates.json';
-import { buildCoverageGrid, buildCountyCoverage, COVERAGE_BANDS, COVERAGE_GAP, pointInUS } from '../lib/coverage';
+import {
+  buildCoverageGrid,
+  buildCountyCoverage,
+  buildValueGrid,
+  buildCountyValues,
+  COVERAGE_BANDS,
+  COVERAGE_GAP,
+  pointInUS,
+} from '../lib/coverage';
 import { apiUrl } from '../lib/apiBase';
 
 /**
@@ -45,6 +53,18 @@ const CATS = [
   { n: 6, name: 'Hazardous', color: '#7E0023' },
 ];
 const CAT_BY_N = Object.fromEntries(CATS.map((c) => [c.n, c]));
+// Category number → hex, passed to the value-choropleth builders in coverage.js.
+const CAT_COLORS = Object.fromEntries(CATS.map((c) => [c.n, c.color]));
+
+// A live-status GeoJSON (monitor dots) → the raw [lat, lon, aqi, cat] rows the
+// value builders take, so the value tabs reuse the one status fetch.
+const sitesFromGeo = (geo) =>
+  (geo?.features ?? []).map((f) => [
+    f.geometry.coordinates[1],
+    f.geometry.coordinates[0],
+    f.properties.aqi,
+    f.properties.cat,
+  ]);
 
 // The contiguous-US window the states outline covers — filter monitors to match.
 const BBOX = { minLon: -125, maxLon: -66.5, minLat: 24, maxLat: 49.5 };
@@ -60,12 +80,15 @@ export default function MonitorMap() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [ready, setReady] = useState(false);
-  const [mode, setMode] = useState('locations'); // 'locations' | 'status' | 'coverage' | 'counties'
+  // 'locations' | 'status' | 'coverage' | 'counties' | 'valueGrid' | 'valueCounties'
+  const [mode, setMode] = useState('locations');
   const [hidden, setHidden] = useState(() => new Set()); // categories hidden in Live AQI
   const [statusGeo, setStatusGeo] = useState(null);
   const [statusMeta, setStatusMeta] = useState(null); // {counts, observedAt} or {error}
   const [coverageGeo, setCoverageGeo] = useState(null);
   const [countyGeo, setCountyGeo] = useState(null);
+  const [valueGridGeo, setValueGridGeo] = useState(null); // live-AQI surface (nearest + fade)
+  const [countyValuesGeo, setCountyValuesGeo] = useState(null); // live-AQI by county
 
   // Static monitor points (contiguous US), built once.
   const { points, shownCount, total } = useMemo(() => {
@@ -107,6 +130,8 @@ export default function MonitorMap() {
       map.addSource('states', { type: 'geojson', data: usStates });
       map.addSource('coverage', { type: 'geojson', data: EMPTY });
       map.addSource('counties', { type: 'geojson', data: EMPTY });
+      map.addSource('valueGrid', { type: 'geojson', data: EMPTY });
+      map.addSource('valueCounties', { type: 'geojson', data: EMPTY });
       map.addSource('monitors', { type: 'geojson', data: points });
       map.addSource('status', { type: 'geojson', data: EMPTY });
 
@@ -118,6 +143,18 @@ export default function MonitorMap() {
         id: 'counties-line',
         type: 'line',
         source: 'counties',
+        layout: { visibility: 'none' },
+        paint: { 'line-color': GROUND, 'line-width': 0.4, 'line-opacity': 0.35 },
+      });
+      // Value choropleths (live AQI, nearest-monitor hue faded by distance).
+      // The distance fade is baked into each feature's `color`, so a single flat
+      // opacity applies — near-monitor counties read vivid, far ones recede.
+      map.addLayer({ id: 'value-grid', type: 'fill', source: 'valueGrid', layout: { visibility: 'none' }, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.9 } });
+      map.addLayer({ id: 'value-counties', type: 'fill', source: 'valueCounties', layout: { visibility: 'none' }, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.92 } });
+      map.addLayer({
+        id: 'value-counties-line',
+        type: 'line',
+        source: 'valueCounties',
         layout: { visibility: 'none' },
         paint: { 'line-color': GROUND, 'line-width': 0.4, 'line-opacity': 0.35 },
       });
@@ -162,6 +199,15 @@ export default function MonitorMap() {
       const statHtml = (p) => `<strong>AQI ${p.aqi}</strong> — ${CAT_BY_N[p.cat]?.name ?? '—'}`;
       const countyHtml = (p) =>
         `<strong>${p.name} County, ${p.state}</strong><br/><span style="color:${INK}">~${p.miles} mi to nearest monitor</span>`;
+      const catName = (p) => CAT_BY_N[p.cat]?.name ?? '—';
+      const valueCountyHtml = (p) =>
+        `<strong>${p.name} County, ${p.state}</strong><br/><span style="color:${INK}">AQI ${p.aqi} — ${catName(p)}<br/>${
+          p.inside === true || p.inside === 'true'
+            ? 'monitor in this county'
+            : `nearest reading ~${p.miles} mi away`
+        }</span>`;
+      const valueGridHtml = (p) =>
+        `<strong>AQI ${p.aqi} — ${catName(p)}</strong><br/><span style="color:${INK}">nearest reading ~${p.miles} mi away</span>`;
       for (const [layer, build] of [
         ['monitors', monHtml],
         ['status', statHtml],
@@ -170,9 +216,15 @@ export default function MonitorMap() {
         map.on('mousemove', layer, hover(build, false));
         map.on('mouseleave', layer, leave);
       }
-      map.on('mouseenter', 'counties', hover(countyHtml, true));
-      map.on('mousemove', 'counties', hover(countyHtml, true));
-      map.on('mouseleave', 'counties', leave);
+      for (const [layer, build] of [
+        ['counties', countyHtml],
+        ['value-counties', valueCountyHtml],
+        ['value-grid', valueGridHtml],
+      ]) {
+        map.on('mouseenter', layer, hover(build, true));
+        map.on('mousemove', layer, hover(build, true));
+        map.on('mouseleave', layer, leave);
+      }
       // Size to the container now that it's laid out, and force the first paint.
       // (On mobile the map can init before the container has its final size,
       // which otherwise leaves the tiles blank until you interact with it.)
@@ -205,6 +257,9 @@ export default function MonitorMap() {
     vis('coverage', mode === 'coverage');
     vis('counties', mode === 'counties');
     vis('counties-line', mode === 'counties');
+    vis('value-grid', mode === 'valueGrid');
+    vis('value-counties', mode === 'valueCounties');
+    vis('value-counties-line', mode === 'valueCounties');
     vis('monitors', mode === 'locations');
     vis('status', mode === 'status');
   }, [mode, ready]);
@@ -289,6 +344,48 @@ export default function MonitorMap() {
     }
   }, [countyGeo, ready]);
 
+  // ── Value surfaces: nearest monitor's live AQI, faded by distance. Both wait
+  // on the live-status fetch (statusGeo) — they color by real readings, so they
+  // can't compute until those land. ───────────────────────────────────────────
+  useEffect(() => {
+    if (mode !== 'valueGrid' || valueGridGeo || !statusGeo) return undefined;
+    const t = setTimeout(
+      () => setValueGridGeo(buildValueGrid(sitesFromGeo(statusGeo), CAT_COLORS, 0.5)),
+      0
+    );
+    return () => clearTimeout(t);
+  }, [mode, valueGridGeo, statusGeo]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready && valueGridGeo) {
+      map.getSource('valueGrid')?.setData(valueGridGeo);
+      map.triggerRepaint();
+    }
+  }, [valueGridGeo, ready]);
+
+  useEffect(() => {
+    if (mode !== 'valueCounties' || countyValuesGeo || !statusGeo) return undefined;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      buildCountyValues(sitesFromGeo(statusGeo), CAT_COLORS).then((geo) => {
+        if (!cancelled) setCountyValuesGeo(geo);
+      });
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [mode, countyValuesGeo, statusGeo]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready && countyValuesGeo) {
+      map.getSource('valueCounties')?.setData(countyValuesGeo);
+      map.triggerRepaint();
+    }
+  }, [countyValuesGeo, ready]);
+
   // ── category filter (Live AQI) ──────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
@@ -307,7 +404,12 @@ export default function MonitorMap() {
   const pct = Math.round((648 / 3144) * 100);
   // Live-AQI dots are prefetched on mount; show a loading veil only if the tab
   // is open before that fetch has landed (and it isn't an outright failure).
-  const statusLoading = mode === 'status' && !statusGeo && !statusMeta?.error;
+  // The value surfaces show the same veil while they compute off that fetch.
+  const valueLoading =
+    (mode === 'valueGrid' && !valueGridGeo) || (mode === 'valueCounties' && !countyValuesGeo);
+  const showVeil =
+    ((mode === 'status' && !statusGeo) || valueLoading) && !statusMeta?.error;
+  const veilLabel = mode === 'status' ? 'Loading live monitor readings…' : 'Building the live-AQI map…';
 
   return (
     <div>
@@ -318,7 +420,7 @@ export default function MonitorMap() {
       </p>
 
       <GourmetMediaContainer
-        title="The monitor gap: every regulatory PM2.5 monitor in the contiguous US"
+        title="A glance at the US: every regulatory PM2.5 monitor, and the air between them"
         controls={<ModeToggle mode={mode} onMode={setMode} />}
         source={SOURCE}
       >
@@ -330,7 +432,7 @@ export default function MonitorMap() {
               role="img"
               aria-label={`Map of ${shownCount} regulatory PM2.5 monitors across the contiguous United States`}
             />
-            {statusLoading && <MapLoadingVeil label="Loading live monitor readings…" />}
+            {showVeil && <MapLoadingVeil label={veilLabel} />}
           </div>
 
           {mode === 'status' ? (
@@ -339,6 +441,10 @@ export default function MonitorMap() {
             <CoverageLegend ready={!!coverageGeo} kind="grid" />
           ) : mode === 'counties' ? (
             <CoverageLegend ready={!!countyGeo} kind="counties" />
+          ) : mode === 'valueGrid' ? (
+            <ValueLegend ready={!!valueGridGeo} kind="grid" meta={statusMeta} />
+          ) : mode === 'valueCounties' ? (
+            <ValueLegend ready={!!countyValuesGeo} kind="counties" meta={statusMeta} />
           ) : (
             <p className="mt-3 text-sm text-ink-muted">
               <strong className="text-ink">{shownCount.toLocaleString()}</strong> active monitors
@@ -376,6 +482,8 @@ function ModeToggle({ mode, onMode }) {
     { value: 'status', label: 'Live AQI' },
     { value: 'coverage', label: 'Coverage gaps' },
     { value: 'counties', label: 'By county' },
+    { value: 'valueGrid', label: 'Live AQI map' },
+    { value: 'valueCounties', label: 'Live AQI by county' },
   ];
   return (
     <div className="flex flex-col gap-1">
@@ -473,6 +581,62 @@ function CoverageLegend({ ready, kind = 'grid' }) {
             {b.label}
           </span>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── ValueLegend: the live-AQI choropleths. Hue = the nearest monitor's current
+   AQI category; the fill FADES toward the background the farther a county sits
+   from a real reading — so vivid = a measurement is close, faint = it's a
+   stretch. Deliberately nearest-neighbour + a confidence fade, not a smooth
+   interpolation, so the guesswork stays visible (the whole point of the page). */
+function ValueLegend({ ready, kind = 'counties', meta }) {
+  if (meta?.error) {
+    return (
+      <p className="mt-3 text-sm text-ink-muted">
+        The live-AQI map needs the AirNow feed, which didn’t respond right now. Try “Coverage gaps”
+        or “By county” — those are built from the monitor locations alone.
+      </p>
+    );
+  }
+  const isCounty = kind === 'counties';
+  return (
+    <div className="mt-3">
+      <p className="mb-1.5 text-sm text-ink-muted">
+        {ready ? (
+          <>
+            {isCounty ? (
+              <>
+                Each county takes the <strong className="text-ink">current AQI category</strong> of
+                the monitor <strong className="text-ink">inside it</strong> — or, if it has none, of
+                its <strong className="text-ink">nearest</strong> monitor.
+              </>
+            ) : (
+              <>
+                Every patch of land takes the <strong className="text-ink">current AQI category</strong>{' '}
+                of its <strong className="text-ink">nearest</strong> monitor.
+              </>
+            )}{' '}
+            The color <strong className="text-ink">fades with distance</strong>: vivid where a real
+            reading is close, faint where the value is stretched far from any monitor. Hover for the
+            reading and the distance.
+          </>
+        ) : (
+          <>Building the live-AQI map…</>
+        )}
+      </p>
+      <div className="flex flex-wrap gap-3">
+        {CATS.map((c) => (
+          <span key={c.n} className="inline-flex items-center gap-1.5 text-xs text-ink">
+            <span className="h-3 w-3 rounded-sm" style={{ background: c.color, opacity: 0.9 }} />
+            {c.name}
+          </span>
+        ))}
+        <span className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
+          <span className="inline-block h-3 w-10 rounded-sm" style={{ background: 'linear-gradient(90deg,#8F3F97,#1f1c19)' }} />
+          near → far from a monitor
+        </span>
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ const site = {
   // of every regulatory PM2.5 monitor, showing how sparse the network is.
   nav: [
     { path: '/', label: "What's in the Air" },
-    { path: '/map', label: 'The monitor gap' },
+    { path: '/map', label: 'A glance at the US' },
   ],
 
   // Header CTA — the tool stays free and ad-free; the "ad" it runs is our own.
