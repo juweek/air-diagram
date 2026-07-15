@@ -153,10 +153,25 @@ export default function MonitorMap() {
         map.on('mousemove', layer, hover(build));
         map.on('mouseleave', layer, leave);
       }
+      // Size to the container now that it's laid out, and force the first paint.
+      // (On mobile the map can init before the container has its final size,
+      // which otherwise leaves the tiles blank until you interact with it.)
+      map.resize();
+      map.triggerRepaint();
       setReady(true);
     });
 
+    // Keep the canvas matched to its container whenever that size changes —
+    // orientation flips, the mobile address bar collapsing, fonts settling, etc.
+    // This is the standard fix for a MapLibre map that renders blank on mobile.
+    const ro = new ResizeObserver(() => {
+      map.resize();
+      map.triggerRepaint();
+    });
+    ro.observe(containerRef.current);
+
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
     };

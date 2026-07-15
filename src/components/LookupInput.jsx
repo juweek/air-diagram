@@ -10,7 +10,7 @@ export default function LookupInput({
   onSubmit,
   defaultValue = '',
   placeholder = 'a ZIP code or city — e.g. 48226 or Detroit',
-  buttonLabel = 'Look up',
+  buttonLabel = 'Search',
   large = false, // landing-hero treatment: bigger type, labelled submit
 }) {
   const [value, setValue] = useState(defaultValue);
@@ -44,7 +44,7 @@ export default function LookupInput({
           aria-label={buttonLabel}
           className="flex shrink-0 items-baseline gap-2 leading-none text-ink-muted transition-colors hover:text-ink-bright"
         >
-          {large && <span className="label-caps !text-inherit">Look up</span>}
+          {large && <span className="label-caps !text-inherit">Search</span>}
           <span className={large ? 'text-2xl' : 'text-xl'}>→</span>
         </button>
       </div>

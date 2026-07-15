@@ -44,7 +44,7 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-8">{children}</main>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-8 lg:px-10">{children}</main>
 
       <footer className="mt-12 border-t border-grid-medium/70">
         <div className="mx-auto max-w-7xl px-5 py-6 text-xs text-ink-muted">

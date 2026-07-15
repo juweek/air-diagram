@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAsync } from '../lib/useAsync';
 import { getByQuery } from '../data/airQuality';
-import { POLLUTANTS, aqiCategory, aqiGuidance, POLLUTANT_BLURBS } from '../lib/pollutants';
+import { POLLUTANTS, aqiCategory, POLLUTANT_BLURBS } from '../lib/pollutants';
 import { pm25Aqi } from '../lib/nowcast';
 import { SOURCES, ULTRAFINE, particleBreakdown } from '../lib/composition';
 import { SCENARIOS } from '../data/scenarios';
@@ -121,7 +121,6 @@ export default function AirPage() {
          nothing at their tops into solid at the baseline), thesis, a large
          centered search, and the scenario / random-place links. ──────────── */}
       <section className="relative -mt-2 mb-8 pt-6 text-center">
-        <p className="label-caps mb-4">— A brief reckoning —</p>
         <h2 className="font-display text-4xl italic leading-[1.05] text-ink-bright sm:text-6xl">
           What’s actually
           <br />
@@ -131,24 +130,23 @@ export default function AirPage() {
         <HeroBars />
 
         <p className="mx-auto mb-7 mt-6 max-w-prose font-display text-lg leading-relaxed text-ink-muted">
-          The green “Good” badge hides two things: a legal line that’s far looser than the health
-          line, and what’s actually in a breath. Search a place to see its air drawn particle by
-          particle.
+          The legal line for clean air is far looser than is actually healthy. Search a place to see
+          its air quality, drawn particle by particle.
         </p>
 
-        <div className="mx-auto max-w-xl">
-          <LookupInput
-            large
-            defaultValue={query}
-            onSubmit={(q) => navigate(`/${encodeURIComponent(q)}`)}
-          />
-        </div>
-
-        <div className="mt-4 flex justify-center">
+        {/* Search and "try someplace new" share one centered row. */}
+        <div className="mx-auto flex max-w-2xl flex-wrap items-end justify-center gap-x-5 gap-y-3">
+          <div className="min-w-[240px] flex-1">
+            <LookupInput
+              large
+              defaultValue={query}
+              onSubmit={(q) => navigate(`/${encodeURIComponent(q)}`)}
+            />
+          </div>
           <button
             type="button"
             onClick={() => navigate(`/${encodeURIComponent(randomPlace(query.toLowerCase()))}`)}
-            className="label-caps rounded-full border border-grid-strong px-4 py-2 !text-ink transition-colors hover:!border-ink hover:!text-ink-bright"
+            className="label-caps shrink-0 rounded-full border border-grid-strong px-4 py-2 !text-ink transition-colors hover:!border-ink hover:!text-ink-bright"
           >
             ↺ Try someplace new
           </button>
@@ -251,24 +249,26 @@ function HeroBars() {
   );
 }
 
-/* ── ScenarioBar: quick presets to compare against a cigarette, wildfire, etc.
-   Each just navigates to /:id — the scenario is a real, shareable address. ── */
+/* ── ScenarioBar: quick presets to compare against a cigarette, wildfire, etc.,
+   as a bordered dropdown. Picking one navigates to /:id — the scenario is a
+   real, shareable address; the select resets to its "Try a scenario" prompt. ── */
 function ScenarioBar({ active, onPick }) {
+  const current = SCENARIOS.find((s) => s.id === active);
   return (
-    <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-      <span className="label-caps">Or a scenario</span>
-      {SCENARIOS.map((s) => (
-        <button
-          key={s.id}
-          type="button"
-          onClick={() => onPick(s.id)}
-          className={`label-caps border-b pb-0.5 transition-colors ${
-            active === s.id ? '!text-ink-bright border-current' : 'border-transparent hover:!text-ink'
-          }`}
-        >
-          {s.label}
-        </button>
-      ))}
+    <div className="mt-6 flex justify-center">
+      <select
+        value={current ? current.id : ''}
+        onChange={(e) => e.target.value && onPick(e.target.value)}
+        aria-label="Try a scenario"
+        className="label-caps cursor-pointer rounded-full border border-grid-strong bg-transparent px-4 py-2 !text-ink transition-colors hover:!border-ink focus:!border-ink focus:outline-none"
+      >
+        <option value="">Try a scenario…</option>
+        {SCENARIOS.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -293,40 +293,34 @@ function RingPanel({ label, data }) {
    legal/WHO switch was redundant. ─────────────────────────────────────────── */
 function Controls({ view, onView }) {
   return (
-    <div className="flex flex-wrap gap-6">
-      <Segmented
-        label="View"
-        value={view}
-        onChange={onView}
-        options={[
-          { value: 'source', label: 'By source' },
-          { value: 'rings', label: 'By pollutant' },
-        ]}
-      />
-    </div>
+    <Segmented
+      value={view}
+      onChange={onView}
+      options={[
+        { value: 'source', label: 'By source' },
+        { value: 'rings', label: 'By pollutant' },
+      ]}
+    />
   );
 }
 
-function Segmented({ label, value, onChange, options }) {
+function Segmented({ value, onChange, options }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{label}</span>
-      {/* No wrapping border here — each option already carries its own pill
-          border (from the .buttonsDiv button convention in index.css). */}
-      <div className="inline-flex flex-wrap gap-2">
-        {options.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
-              value === opt.value ? '!bg-ink !text-cream' : 'text-ink-muted hover:!text-ink'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+    // No wrapping border here — each option already carries its own pill border
+    // (from the .buttonsDiv button convention in index.css).
+    <div className="inline-flex flex-wrap gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+            value === opt.value ? '!bg-ink !text-cream' : 'text-ink-muted hover:!text-ink'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -429,37 +423,17 @@ function ProvenanceBadge({ measured, fallback, scenario }) {
   );
 }
 
-/* ── GuidanceSection: what to actually DO at this AQI — the crisis visitor's
-   real question, in its own titled section. Static EPA/AirNow activity guidance
-   keyed to the category bands; linked so the compressed advice is checkable. ─ */
-function GuidanceSection({ aqi }) {
-  const text = aqiGuidance(aqi);
-  if (!text) return null;
-  return (
-    <Section title={`What to do at ${aqi}`}>
-      <div className="rounded-md border-l-2 border-data-primary bg-cream/60 px-3 py-2">
-        <p className="text-xs leading-relaxed text-ink">
-          {text}{' '}
-          <a
-            href="https://www.airnow.gov/aqi/aqi-basics/"
-            target="_blank"
-            rel="noreferrer"
-            className="whitespace-nowrap underline"
-          >
-            EPA guidance
-          </a>
-        </p>
-      </div>
-    </Section>
-  );
-}
-
-// 'YYYY-MM-DDTHH:MM' (already local to the place — timezone=auto) → '8 PM'.
-function hourLabel(time) {
+// 'YYYY-MM-DDTHH:MM' (local to the place — timezone=auto) → { hour: '8 PM',
+// date: 'Jul 14' }. The series can cross a day boundary, so the trend labels
+// and tooltip carry the date too.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function timeParts(time) {
   const h = parseInt(time.slice(11, 13), 10);
-  if (Number.isNaN(h)) return time.slice(11, 16);
-  const ampm = h < 12 ? 'AM' : 'PM';
-  return `${h % 12 === 0 ? 12 : h % 12} ${ampm}`;
+  const mo = parseInt(time.slice(5, 7), 10);
+  const day = parseInt(time.slice(8, 10), 10);
+  const hour = Number.isNaN(h) ? time.slice(11, 16) : `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}`;
+  const date = Number.isNaN(mo) ? '' : `${MONTHS[mo - 1]} ${day}`;
+  return { hour, date };
 }
 
 /* ── TrendBars: "is it getting better?" — the last 24 hours of PM2.5 as tiny
@@ -469,25 +443,25 @@ function hourLabel(time) {
 function TrendBars({ history }) {
   const [hover, setHover] = useState(null);
   if (!history || history.length < 3) return null;
-  const max = Math.max(...history.map((h) => h.value), 1);
+  // Oldest → newest, so the most recent reading is always the rightmost bar.
+  const series = [...history].sort((a, b) => (a.time < b.time ? -1 : 1));
+  const max = Math.max(...series.map((h) => h.value), 1);
   // Trend word: the last 3 hours against the 3 before them.
   const avg = (arr) => arr.reduce((a, b) => a + b.value, 0) / (arr.length || 1);
-  const tail = avg(history.slice(-3));
-  const prev = avg(history.slice(-6, -3));
-  const trend =
-    tail > prev * 1.15 ? '↑ rising' : tail < prev * 0.85 ? '↓ easing' : '→ steady';
+  const tail = avg(series.slice(-3));
+  const prev = avg(series.slice(-6, -3));
+  const trend = tail > prev * 1.15 ? '↑ rising' : tail < prev * 0.85 ? '↓ easing' : '→ steady';
+  const first = timeParts(series[0].time);
+  const last = timeParts(series[series.length - 1].time);
 
   return (
     <div className="mb-3">
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="label-caps">PM2.5 · last {history.length} hrs</span>
+        <span className="label-caps">PM2.5 · last {series.length} hrs</span>
         <span className="text-[11px] tabular-nums text-ink-muted">{trend}</span>
       </div>
-      <div
-        className="relative flex h-12 items-end gap-px"
-        onMouseLeave={() => setHover(null)}
-      >
-        {history.map((h, i) => {
+      <div className="relative flex h-12 items-end gap-px" onMouseLeave={() => setHover(null)}>
+        {series.map((h, i) => {
           const cat = aqiCategory(pm25Aqi(h.value));
           return (
             <div
@@ -504,16 +478,21 @@ function TrendBars({ history }) {
         })}
         {hover != null && (
           <div
-            className="pointer-events-none absolute bottom-full z-20 mb-1 -translate-x-1/2 whitespace-nowrap rounded border border-grid-strong bg-cream px-2 py-1 text-[11px] text-ink shadow-lg"
-            style={{ left: `${((hover + 0.5) / history.length) * 100}%` }}
+            className="pointer-events-none absolute bottom-full z-50 mb-1 -translate-x-1/2 whitespace-nowrap rounded border border-grid-strong bg-cream px-2 py-1 text-[11px] text-ink shadow-xl"
+            style={{ left: `${((hover + 0.5) / series.length) * 100}%` }}
           >
-            {hourLabel(history[hover].time)} · {history[hover].value.toFixed(1)} µg/m³
+            {timeParts(series[hover].time).date}, {timeParts(series[hover].time).hour} ·{' '}
+            {series[hover].value.toFixed(1)} µg/m³
           </div>
         )}
       </div>
       <div className="mt-0.5 flex justify-between text-[10px] text-ink-muted">
-        <span>{hourLabel(history[0].time)}</span>
-        <span>{hourLabel(history[history.length - 1].time)}</span>
+        <span>
+          {first.date}, {first.hour}
+        </span>
+        <span>
+          {last.date}, {last.hour} (now)
+        </span>
       </div>
     </div>
   );
@@ -563,16 +542,28 @@ const MEASURED_LABELS = { 'PM2.5': 'PM2.5', O3: 'O₃', PM10: 'PM10' };
      • modeled   → CAMS estimate + how far the nearest real monitor is (the gap)
    The nearest-monitor "your number is a model stretched over that gap" line only
    appears in the MODELED case — when a monitor reading exists it would be a lie. */
-function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor }) {
+function SourceLink({ source }) {
+  if (!source) return null;
+  return (
+    <p className="mt-2 text-[11px] text-ink-muted">
+      Source:{' '}
+      <a href={source.url} target="_blank" rel="noreferrer" className="text-data-primary underline">
+        {source.label}
+      </a>
+    </p>
+  );
+}
+
+function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor, source }) {
   if (measured) {
     const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
     return (
-      <Section title="Where this number comes from">
+      <Section title="Source">
         <p className="text-[11px] leading-snug text-ink">
-          A <strong>real monitor reading</strong> from the <strong>{measured.reportingArea}</strong>{' '}
-          reporting area
-          {measured.distanceMi != null && <> ({measured.distanceMi} mi away)</>}, {measured.observedAt}
-          , published by <strong>AirNow (US EPA)</strong> — a monitor, not a model.
+          <strong>Detected from a PM2.5 air monitor</strong> — the{' '}
+          <strong>{measured.reportingArea}</strong> reporting area
+          {measured.distanceMi != null && <> ({measured.distanceMi} mi away)</>}, {measured.observedAt},
+          via AirNow (US EPA).
         </p>
         {keys.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
@@ -602,19 +593,21 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
             })}
           </div>
         )}
+        <SourceLink source={source} />
       </Section>
     );
   }
 
   if (result.fallback) {
     return (
-      <Section title="Where this number comes from">
+      <Section title="Source">
         <p className="text-xs leading-relaxed text-ink">
           <strong>Live data is unavailable right now.</strong> This is the{' '}
           <strong>typical annual average</strong> PM2.5 from the nearest EPA monitor (
           {result.fallback.distanceMi} mi away, 2024) — a stand-in for the usual air here, not
           today’s reading.
         </p>
+        <SourceLink source={source} />
       </Section>
     );
   }
@@ -623,24 +616,25 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
     return (
       <Section title="About this scenario">
         <p className="text-xs leading-relaxed text-ink-muted">{result.blurb}</p>
+        <SourceLink source={source} />
       </Section>
     );
   }
 
   // Modeled: no monitor reading nearby.
   return (
-    <Section title="Where this number comes from">
+    <Section title="Source">
       <p className="text-xs leading-relaxed text-ink-muted">
-        {modeled.driver && (
+        <strong>Modeled, not detected</strong> — interpolated between distant monitors (CAMS model,
+        ~11 km grid), the same kind of estimate most phone apps show
+        {modeled.driver ? (
           <>
-            Today’s driver: <strong>{modeled.driver}</strong>
-            {nowcast?.aqi != null &&
-              ` · NowCast PM2.5 ${nowcast.concentration.toFixed(1)} µg/m³ (12-hr weighted)`}
-            .{' '}
+            . Today’s driver: <strong>{modeled.driver}</strong>
           </>
+        ) : (
+          ''
         )}
-        No monitor reading was available nearby, so this is a <strong>modeled estimate</strong>{' '}
-        (CAMS atmospheric model, ~11 km grid) — the same kind of interpolation most phone apps show.
+        .
       </p>
       <SubIndexStrip current={current} driver={modeled.driver} nowcast={nowcast} />
       {monitor && (
@@ -650,6 +644,7 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
           over that gap. Only ~1 in 5 US counties has one at all.
         </p>
       )}
+      <SourceLink source={source} />
     </Section>
   );
 }
@@ -713,10 +708,7 @@ function Readout({ result, view, hidden, onToggle, source }) {
 
       <AqiMeter aqi={displayAqi} category={category} />
 
-      <GuidanceSection aqi={displayAqi} />
-
-      <TrendBars history={result.history} />
-
+      {/* Provenance + source, directly under the reading. */}
       <ProvenanceSection
         measured={measured}
         modeled={modeled}
@@ -724,7 +716,10 @@ function Readout({ result, view, hidden, onToggle, source }) {
         current={current}
         nowcast={nowcast}
         monitor={monitor}
+        source={source}
       />
+
+      <TrendBars history={result.history} />
 
       {measured && modelForCompare?.aqi != null && (
         <ModelComparisonSection modeled={modelForCompare} measuredAqi={measured.aqi} />
@@ -732,13 +727,7 @@ function Readout({ result, view, hidden, onToggle, source }) {
 
       <div className="mt-4 border-t border-grid-strong pt-4">
         {view === 'source' ? (
-          <SourceLegend
-            current={current}
-            mode="legal"
-            hidden={hidden}
-            onToggle={onToggle}
-            source={source}
-          />
+          <SourceLegend current={current} mode="legal" hidden={hidden} onToggle={onToggle} />
         ) : (
           <PollutantList current={current} />
         )}
@@ -845,11 +834,7 @@ function SubIndexStrip({ current, driver, nowcast }) {
   }).filter((d) => d.aqi != null);
   if (items.length < 2) return null;
   return (
-    <div className="mb-3">
-      <p className="mb-1.5 text-[11px] leading-snug text-ink-muted">
-        The headline is the <strong>worst</strong> of six separate pollutant scores — not an average.
-        All six right now:
-      </p>
+    <div className="mb-3 mt-2">
       <div className="flex flex-wrap gap-1">
         {items.map((d) => {
           const isDriver = d.label === driver;
@@ -877,7 +862,7 @@ function SubIndexStrip({ current, driver, nowcast }) {
   );
 }
 
-function SourceLegend({ current, mode, hidden, onToggle, source }) {
+function SourceLegend({ current, mode, hidden, onToggle }) {
   const breakdown = particleBreakdown(current, mode);
   // The five regulated sources make up the "official" breath, so their shares
   // sum to 100%. Ultrafine sits OUTSIDE that 100% — it's never in the mass
@@ -887,7 +872,6 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
     ...s,
     pct: Math.round((breakdown.fractions[s.key] ?? 0) * 100),
   })).filter((s) => s.pct > 0);
-  const lineLabel = mode === 'who' ? 'WHO health line (5 µg/m³)' : 'US legal line (9 µg/m³)';
 
   // The source split is modeled from the OTHER pollutants (NO₂, SO₂, dust…). The
   // typical-annual fallback carries only a PM2.5 mass, so there's nothing to
@@ -908,16 +892,13 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
     <div>
       <h4 className="mb-1 font-subtitle text-base">What’s in this breath</h4>
       <p className="mb-2 text-xs leading-relaxed text-ink-muted">
-        By volume a breath is ~78% nitrogen, ~21% oxygen and ~1% argon — that’s{' '}
-        <strong>99.9%+</strong> of every breath. Everything below is the leftover sliver of
-        pollution (well under 0.01% of the air), zoomed in and split by source. Tap a row to remove
-        it.
+        By volume a breath is ~78% nitrogen, ~21% oxygen and ~1% argon. Everything leftover is
+        pollution (well under 0.01% of the air).
       </p>
       <p className="mb-2 rounded-md bg-cream/60 px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
-        These buckets are the <strong>modeled</strong> makeup of the fine-particle (PM2.5){' '}
-        <em>mass</em> — what the particles likely are, not the gases. “Sulfate &amp; nitrate haze,”
-        for instance, is the <em>particle</em> that forms when SO₂ and NO₂ <em>gases</em> react in
-        the air; those gases themselves are measured in the <strong>By pollutant</strong> view.
+        These buckets are the <strong>modeled</strong> makeup of the fine-particle (PM2.5) mass —
+        what the particles likely are, not the gases. “Sulfate &amp; nitrate haze,” for instance, is
+        the particle that forms when SO₂ and NO₂ gases react in the air.
       </p>
       {/* Percentages only — the raw speck counts are rendering density (they
           change with screen size), so quoting them as data was false precision. */}
@@ -928,7 +909,7 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
           </LegendRow>
         ))}
         {breakdown.ultrafine > 0 && (
-          <li className="mt-1 border-t border-dashed border-grid-strong pt-1.5">
+          <li className="mt-0.5">
             <LegendRow
               entry={{ ...ULTRAFINE, label: 'Ultrafine — never counted' }}
               off={hidden.includes(ULTRAFINE.key)}
@@ -941,25 +922,11 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
         )}
       </ul>
       <p className="mt-3 text-xs leading-relaxed text-ink-muted">
-        Percentages are the share of the modeled particle mass (from the regulated pollutants, not
-        directly measured), scaled against the <strong>{lineLabel}</strong>.{' '}
-        <strong>Ultrafine</strong> is extra: particles so small they never enter the official mass
-        number, so they don’t count toward the 100% above — the swarm drawn is a modeled intensity,
-        not a count.
+        Percentages are the share of the modeled particle mass, scaled against the{' '}
+        <strong>US legal line (9 µg/m³)</strong>. Ultrafine is extra: particles so small they never
+        enter the official mass number, so they don’t count toward the 100% above. The swarm drawn is
+        a modeled intensity, not a count.
       </p>
-      {source && (
-        <p className="mt-2 text-xs text-ink-muted">
-          Source:{' '}
-          <a
-            href={source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-data-primary underline"
-          >
-            {source.label}
-          </a>
-        </p>
-      )}
     </div>
   );
 }
@@ -1016,16 +983,12 @@ function PollutantList({ current }) {
           // three bars compare honestly — but scales are not comparable across
           // pollutants (CO lives in the thousands, SO₂ in the tens).
           const top = Math.max(value, def.who, def.legal) * 1.05;
-          // Over-the-line highlight: a warm reddish wash when the reading passes
-          // a reference line. Over the (looser) US legal line reads stronger;
-          // over only the WHO health line is a fainter warning.
-          const overLegal = value > def.legal;
-          const overWho = value > def.who;
-          const cardTint = overLegal
-            ? 'border-[#D6392F]/50 bg-[#D6392F]/12'
-            : overWho
-              ? 'border-[#D6392F]/25 bg-[#D6392F]/[0.06]'
-              : 'border-grid-strong bg-cream/40';
+          // Over-the-line highlight: ONE consistent reddish wash whenever the
+          // reading passes either reference line (border + background together).
+          const overLine = value > def.who || value > def.legal;
+          const cardTint = overLine
+            ? 'border-[#D6392F]/50 bg-[#D6392F]/[0.10]'
+            : 'border-grid-strong bg-cream/40';
           return (
             <li key={def.key} className={`rounded-lg border p-3 text-sm ${cardTint}`}>
               <div className="flex items-baseline justify-between gap-2">
