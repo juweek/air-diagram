@@ -93,6 +93,28 @@
 
   /* (The old .glitch-texture hero treatment was replaced by the HeroBars SVG
      in AirPage.jsx — a bar-chart skyline whose tops fade into the charcoal.) */
+
+  /* Hero skyline: bars rise once on load. Transform-only so it's cheap. */
+  @keyframes hero-bar-rise {
+    from {
+      transform: scaleY(0);
+      opacity: 0;
+    }
+    to {
+      transform: scaleY(1);
+      opacity: 1;
+    }
+  }
+  .hero-bar {
+    transform-box: fill-box;
+    transform-origin: bottom center;
+    animation: hero-bar-rise 1.05s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-bar {
+      animation: none;
+    }
+  }
 }
 
 /* ── gourmetMediaContainer — dark editorial skin ─────────────────────────────

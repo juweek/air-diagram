@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import site from '../site.config';
 
@@ -5,7 +6,28 @@ import site from '../site.config';
 // a serif wordmark, and a pill-outline CTA back to the search. Attribution stays
 // pinned to every page (required). The dusk gradient behind everything lives in
 // index.css (body::before), so the chrome here is transparent over it.
+// On phones the inline nav collapses into a menu so "The monitor gap" stays
+// reachable — it's a core piece of the argument, not a desktop-only extra.
 export default function Layout({ children }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-grid-medium/70">
@@ -33,14 +55,54 @@ export default function Layout({ children }) {
               ))}
             </nav>
           </div>
-          <a
-            href={site.support.url}
-            target="_blank"
-            rel="noreferrer"
-            className="label-caps rounded-full border border-grid-strong px-4 py-2 !text-ink transition-colors hover:!border-ink"
-          >
-            {site.support.label}
-          </a>
+          <div className="flex items-center gap-2">
+            <div className="relative sm:hidden" ref={menuRef}>
+              <button
+                type="button"
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                aria-label="Open menu"
+                onClick={() => setMenuOpen((o) => !o)}
+                className="label-caps rounded-full border border-grid-strong px-3 py-2 !text-ink transition-colors hover:!border-ink"
+              >
+                Menu {menuOpen ? '▴' : '▾'}
+              </button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-40 mt-2 min-w-[11rem] rounded-lg border border-grid-strong bg-cream py-1 shadow-xl"
+                >
+                  {site.nav.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      end={item.path === '/'}
+                      role="menuitem"
+                      onClick={() => setMenuOpen(false)}
+                      className={({ isActive }) =>
+                        `block px-4 py-2.5 text-sm transition-colors ${
+                          isActive
+                            ? 'bg-ink/10 font-semibold text-ink-bright'
+                            : 'text-ink hover:bg-ink/5'
+                        }`
+                      }
+                    >
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+            <a
+              href={site.support.url}
+              target="_blank"
+              rel="noreferrer"
+              className="label-caps rounded-full border border-grid-strong px-3 py-2 !text-ink transition-colors hover:!border-ink sm:px-4"
+            >
+              <span className="sm:hidden">Support</span>
+              <span className="hidden sm:inline">{site.support.label}</span>
+            </a>
+          </div>
         </div>
       </header>
 

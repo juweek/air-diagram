@@ -19,32 +19,33 @@ import { PM25_LINES } from './pollutants.js';
 // hue's meaning (smoke = warm ash, haze = cool blue, wildfire = purple, …) but
 // bright enough to read both as a glowing orb and as a legend swatch.
 export const SOURCES = [
-  { key: 'soot', label: 'Combustion soot', color: '#CBBDA6', size: [2, 4] },
-  { key: 'brake', label: 'Road & brake dust', color: '#DE9440', size: [4, 7] },
-  { key: 'haze', label: 'Sulfate & nitrate haze', color: '#8FB2E6', size: [3, 5] },
-  { key: 'wildfire', label: 'Wildfire char', color: '#C06BCB', size: [3, 6] },
+  { key: 'soot', label: 'Combustion soot', color: '#CBBDA6', size: [1.4, 2.8] },
+  { key: 'brake', label: 'Road & brake dust', color: '#DE9440', size: [2.5, 4.5] },
+  { key: 'haze', label: 'Sulfate & nitrate haze', color: '#8FB2E6', size: [2, 3.5] },
+  { key: 'wildfire', label: 'Wildfire char', color: '#C06BCB', size: [2, 4] },
   // bio currently draws 0 specks — no measured proxy exists for it (see
   // composition() below) and zero must mean zero. Kept for a future pollen feed.
-  { key: 'bio', label: 'Pollen & biological', color: '#6BD08F', size: [5, 9] },
+  { key: 'bio', label: 'Pollen & biological', color: '#6BD08F', size: [3.5, 6] },
 ];
 
 export const ULTRAFINE = {
   key: 'ultrafine',
-  label: 'Ultrafine — never counted',
+  label: 'Ultrafine',
   color: '#F0584A',
-  size: [1, 2],
+  size: [0.7, 1.4],
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 const map = (v, a, b, c, d) => c + ((v - a) / (b - a)) * (d - c);
 
-// Density multiplier for the scattered source view. More specks make the field
-// legible, but the source view redraws every speck each frame, so the ceiling
-// is lower on phones than on desktop. This only scales the source view — the
-// pollutant rings are untouched.
+// Density multiplier for the scattered source view. Pollution is well under
+// 0.01% of a breath by volume — the field has to stay sparse enough that the
+// dark between specks reads as "mostly empty air." More specks make the field
+// legible, but overselling density would make clean-ish air look smoggy. This
+// only scales the source view — the pollutant rings are untouched.
 export function densityScale() {
   if (typeof window === 'undefined') return 1;
-  return window.innerWidth < 700 ? 2 : 3.5;
+  return window.innerWidth < 700 ? 1.1 : 1.6;
 }
 
 // Turn a set of current readings into source fractions (summing to 1) plus an
@@ -100,7 +101,9 @@ export function particleBreakdown(current, mode = 'legal') {
   const line = mode === 'who' ? PM25_LINES.who : PM25_LINES.legal;
   const ratio = clamp((current.pm2_5 ?? 0) / line, 0, 6);
   const scale = densityScale();
-  const total = Math.round(map(ratio, 0, 6, 40, 1050) * scale);
+  // Sparse on purpose: a breath is ~99.99% N₂/O₂/Ar. The swarm is an intensity
+  // diagram, not a particle census — keep the field mostly empty dark.
+  const total = Math.round(map(ratio, 0, 6, 18, 420) * scale);
 
   const sources = {};
   for (const s of SOURCES) {
@@ -108,7 +111,7 @@ export function particleBreakdown(current, mode = 'legal') {
   }
   // Ultrafine dominates the heavy-combustion scenarios (cigarette, joint); a
   // lower multiplier keeps those fields from overwhelming the canvas.
-  const ultrafine = Math.round(comp.ultrafineIndex * 150 * scale);
+  const ultrafine = Math.round(comp.ultrafineIndex * 70 * scale);
 
   return { sources, ultrafine, total, fractions: comp.fractions, line, ratio };
 }

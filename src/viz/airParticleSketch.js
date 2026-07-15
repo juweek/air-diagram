@@ -6,7 +6,7 @@ import { SOURCES, ULTRAFINE, particleBreakdown } from '../lib/composition.js';
  * No global mode, no controller — P5Sketch.jsx owns mount/teardown and re-runs
  * this whenever `data` changes. `data = { current, view, mode, hidden }`:
  *   view: 'baseline' | 'source' | 'rings'   (baseline = Earth's atmosphere)
- *   mode: 'legal' | 'who'                    (which reference line)
+ *   mode: 'legal' | 'who' | 'current'        (which reference / scale)
  *   current: the Open-Meteo `current` readings (null in baseline view)
  *
  * RENDERING (Style-2 charcoal): two deliberately different languages —
@@ -46,11 +46,9 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 // Camera state lives at module level so orbit/zoom survive the React remounts
 // that happen on every toggle (P5Sketch remounts whenever `data` changes).
 const cam = { yaw: -0.35, pitch: 0.12, zoom: 1 };
-// minZoom now deliberately pulls PAST the volume edge: fully zoomed out you see
-// the whole cloud floating as one round patch of air — the cylinder footprint
-// (see buildSource) is what makes that pulled-back view read as a circular
-// area on the floor instead of a box.
-const CAM = { minZoom: 0.42, maxZoom: 3, maxPitch: 1.25, idleSpin: 0.0012 };
+// minZoom pulls PAST the volume edge so you can scroll the patch farther out
+// and read the cloud as one round area of mostly-empty air.
+const CAM = { minZoom: 0.28, maxZoom: 3, maxPitch: 1.25, idleSpin: 0.0012 };
 
 // One soft radial-gradient sprite per colour, pre-rendered once on a raw canvas.
 // Deliberately dim: with additive compositing, clustered orbs sum toward light,
@@ -252,7 +250,9 @@ export function airParticleSketch(p, data) {
     pulseSpeed = BASE_PULSE_SPEED;
     let r = 50;
     for (const layer of BASELINE_LAYERS) {
-      const numParticles = p.map(layer.value, 0, 100, 0, 5000);
+      // Home page only — keep the N₂/O₂ rings readable but light on the GPU.
+      // Cap well below the old 5000 so the idle landing page stays smooth.
+      const numParticles = Math.round(p.map(layer.value, 0, 100, 0, 1400));
       const step = Math.max(24, p.sqrt(layer.value / p.PI) * 10);
       r = addRing(step, r, layer.color, layer, numParticles);
     }
@@ -304,20 +304,15 @@ export function airParticleSketch(p, data) {
     specks = [];
     agitation = clamp(p.map(c.us_aqi ?? 0, 0, 300, 0.5, 2.5), 0.5, 2.5);
 
-    // The volume: a cylinder sized to the canvas — footprint radius r on the
-    // floor plane, half-height ry. At default zoom the canvas frames a window
-    // into it (you feel inside the air); at full zoom-out the whole cloud fits
-    // in frame and reads as a circular patch of air, not a box.
-    field = { r: p.width * 0.7, ry: p.width * 0.55 };
+    // Larger cylinder so zoom-out has more "air" to reveal around the cloud.
+    field = { r: p.width * 0.92, ry: p.width * 0.7 };
 
     const breakdown = particleBreakdown(c, mode);
 
     // Every orb is one drawImage per frame, so cap the field and subsample
     // proportionally when a heavy scenario (cigarette, wildfire) would blow
     // past it — a dense field still reads dense, and the frame stays smooth.
-    // Slightly higher than before the volume grew, so the bigger box keeps a
-    // comparable density without blowing the frame budget.
-    const MAX_SPECKS = typeof window !== 'undefined' && window.innerWidth < 700 ? 1000 : 1800;
+    const MAX_SPECKS = typeof window !== 'undefined' && window.innerWidth < 700 ? 550 : 900;
     const visible = SOURCES.filter((s) => !hidden.includes(s.key)).map((s) => ({
       color: s.color,
       size: s.size,
@@ -374,9 +369,8 @@ export function airParticleSketch(p, data) {
       const scale = f / denom;
       const px = halfW + x1 * cam.zoom * scale;
       const py = halfH + y1 * cam.zoom * scale;
-      // 4.2 (was 5): slightly smaller orbs — the point is that even "bad" air
-      // is mostly empty space, so let the darkness between specks show.
-      const d = s.radius * 4.2 * scale;
+      // Smaller orbs + more empty dark: pollution is a tiny fraction of a breath.
+      const d = s.radius * 3.1 * scale;
       if (px + d < 0 || px - d > p.width || py + d < 0 || py - d > p.height) continue;
 
       // Nearer = brighter; fade out approaching the near cull so orbs never pop.

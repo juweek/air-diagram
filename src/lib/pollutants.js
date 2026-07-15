@@ -127,8 +127,16 @@ export function pollutantNorm(def, value) {
 // line". Because the WHO line is lower, flipping to it raises every reading's
 // exceedance — which is what makes the same air fill with specks.
 export function exceedance(def, value, mode = 'legal') {
+  if (value == null) return 0;
+  // "current" = today's reading vs a typical urban high for that pollutant
+  // (def.range[1]), not against a health or legal line.
+  if (mode === 'current') {
+    const top = def.range?.[1];
+    if (!top) return 0;
+    return Math.max(0, value / top);
+  }
   const line = mode === 'who' ? def.who : def.legal;
-  if (!line || value == null) return 0;
+  if (!line) return 0;
   return Math.max(0, value / line);
 }
 

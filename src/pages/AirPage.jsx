@@ -94,16 +94,13 @@ export default function AirPage() {
   const current = hasResult ? state.data.current : null;
 
   // Stable objects so each P5Sketch only remounts on a real data change.
-  // The source/baseline view uses one canvas (sketchData); the pollutant view
-  // uses two — the same rings against the WHO line and the legal line side by
-  // side — so it gets its own pair of memoized data objects. There's no
-  // legal/WHO toggle any more: the source field always renders the current
-  // readings scaled against the legal line (the "Good" line the piece critiques),
-  // and the legal-vs-WHO contrast lives entirely in the two by-pollutant rings.
+  // Source/baseline: one canvas. By-pollutant: a carousel of three ring views
+  // (today’s air / WHO / legal) — only one sketch is mounted at a time.
   const sketchData = useMemo(
     () => ({ current, view: hasResult ? view : 'baseline', mode: 'legal', hidden }),
     [current, hasResult, view, hidden]
   );
+  const ringsCurrent = useMemo(() => ({ current, view: 'rings', mode: 'current' }), [current]);
   const ringsWho = useMemo(() => ({ current, view: 'rings', mode: 'who' }), [current]);
   const ringsLegal = useMemo(() => ({ current, view: 'rings', mode: 'legal' }), [current]);
   const showRings = hasResult && view === 'rings';
@@ -134,9 +131,9 @@ export default function AirPage() {
 
         <HeroBars />
 
-
-        {/* Search and "try someplace new" share one centered row. */}
-        <div className="mx-auto flex max-w-2xl flex-wrap items-end justify-center gap-x-5 gap-y-3">
+        {/* Search and "try someplace new" share one centered row. Extra top
+           margin separates the skyline from the lookup so the bars can breathe. */}
+        <div className="mx-auto mt-10 flex max-w-2xl flex-wrap items-end justify-center gap-x-5 gap-y-3 sm:mt-14">
           <div className="min-w-[240px] flex-1">
             <LookupInput
               large
@@ -168,13 +165,14 @@ export default function AirPage() {
           {hasResult && state.data.alert && <AlertBanner alert={state.data.alert} />}
           <div className="flex flex-wrap items-start justify-center gap-6 text-left">
             {showRings ? (
-              // Two ring canvases stacked vertically inside one cream panel — the
-              // shared background makes them read as a single split canvas.
               <div className="w-full max-w-[560px] flex-1 basis-[420px]">
-                <div className="mx-auto max-w-[360px] rounded-lg bg-cream p-2">
-                  <RingPanel label="WHO health line" data={ringsWho} />
-                  <RingPanel label="US legal line" data={ringsLegal} />
-                </div>
+                <RingCarousel
+                  slides={[
+                    { key: 'current', label: 'Today’s air', data: ringsCurrent },
+                    { key: 'who', label: 'WHO health line', data: ringsWho },
+                    { key: 'legal', label: 'US legal line', data: ringsLegal },
+                  ]}
+                />
               </div>
             ) : (
               <div className="w-full max-w-[560px] flex-1 basis-[420px]">
@@ -243,7 +241,16 @@ function HeroBars() {
       </defs>
       <g mask="url(#heroBarMask)" fill="rgb(var(--sand))" opacity="0.32">
         {bars.map((b, i) => (
-          <rect key={i} x={b.x} y={150 - b.h} width={b.w} height={b.h} rx="1" />
+          <rect
+            key={i}
+            className="hero-bar"
+            x={b.x}
+            y={150 - b.h}
+            width={b.w}
+            height={b.h}
+            rx="1"
+            style={{ animationDelay: `${(i % 40) * 18}ms` }}
+          />
         ))}
       </g>
     </svg>
@@ -274,24 +281,119 @@ function ScenarioBar({ active, onPick }) {
   );
 }
 
-/* ── RingPanel: one labeled pollutant-ring canvas. Two stack vertically inside
-   a shared cream panel (WHO above, legal below) so the two reference lines read
-   against each other on the same apparent canvas. ─────────────────────────── */
-function RingPanel({ label, data }) {
+/* ── RingCarousel: one pollutant-ring canvas at a time. Three slides —
+   today’s air (vs typical urban range), WHO health line, US legal line —
+   so the same breath is judged three ways without stacking canvases. Swipe
+   sideways (or use the dots / arrows) to cycle; only the active slide mounts
+   a P5Sketch, so the other two cost nothing until shown. ─────────────────── */
+const RING_SWIPE_PX = 48;
+
+function RingCarousel({ slides }) {
+  const [index, setIndex] = useState(0);
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const start = useRef(null); // { x, y, axis: null | 'x' | 'y' }
+  const n = slides.length;
+  const go = (i) => setIndex(((i % n) + n) % n);
+  const slide = slides[index];
+
+  const onPointerDown = (e) => {
+    if (e.pointerType === 'touch' && e.isPrimary === false) return;
+    start.current = { x: e.clientX, y: e.clientY, axis: null };
+    setDragging(true);
+    setDragX(0);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!start.current) return;
+    const dx = e.clientX - start.current.x;
+    const dy = e.clientY - start.current.y;
+    // Lock to an axis once the gesture commits, so vertical page scroll wins
+    // when the finger mostly moves up/down (Tinder-style horizontal only).
+    if (!start.current.axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      start.current.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+    }
+    if (start.current.axis === 'y') return;
+    setDragX(dx);
+  };
+  const onPointerUp = () => {
+    if (!start.current) return;
+    if (start.current.axis === 'x') {
+      if (dragX <= -RING_SWIPE_PX) go(index + 1);
+      else if (dragX >= RING_SWIPE_PX) go(index - 1);
+    }
+    start.current = null;
+    setDragging(false);
+    setDragX(0);
+  };
+
   return (
-    <div>
-      <div className="py-1 text-center text-xs font-semibold uppercase tracking-wide text-ink-muted">
-        {label}
+    <div className="mx-auto max-w-[400px]">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          aria-label="Previous ring view"
+          onClick={() => go(index - 1)}
+          className="label-caps rounded-full border border-grid-strong px-3 py-1 !text-ink transition-colors hover:!border-ink"
+        >
+          ‹
+        </button>
+        <div className="min-w-0 text-center">
+          <div className="text-xs font-semibold uppercase tracking-wide text-ink">
+            {slide.label}
+          </div>
+          <div className="mt-0.5 text-[10px] text-ink-muted">
+            {index + 1} / {n} · swipe to compare
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Next ring view"
+          onClick={() => go(index + 1)}
+          className="label-caps rounded-full border border-grid-strong px-3 py-1 !text-ink transition-colors hover:!border-ink"
+        >
+          ›
+        </button>
       </div>
-      <P5Sketch sketch={airParticleSketch} data={data} />
+
+      <div
+        className="touch-pan-y select-none overflow-hidden rounded-lg bg-cream p-2"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <div
+          className={dragging ? '' : 'transition-transform duration-200 ease-out'}
+          style={{ transform: `translateX(${dragX * 0.35}px)` }}
+        >
+          <P5Sketch key={slide.key} sketch={airParticleSketch} data={slide.data} />
+        </div>
+      </div>
+
+      <div className="mt-3 flex justify-center gap-2" role="tablist" aria-label="Ring views">
+        {slides.map((s, i) => (
+          <button
+            key={s.key}
+            type="button"
+            role="tab"
+            aria-selected={i === index}
+            aria-label={s.label}
+            onClick={() => go(i)}
+            className={`h-2 w-2 rounded-full transition-colors ${
+              i === index ? 'bg-ink' : 'bg-grid-strong hover:bg-ink/50'
+            }`}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-/* ── Controls: the single "View" toggle. There's no "Measured against" toggle
-   any more — the by-pollutant view already shows the WHO and legal lines side
-   by side, and the source field renders the current readings directly, so the
-   legal/WHO switch was redundant. ─────────────────────────────────────────── */
+/* ── Controls: the single "View" toggle. By-pollutant is a carousel of three
+   ring judgments (today / WHO / legal); the source field always renders against
+   the legal line (the "Good" line the piece critiques). ───────────────────── */
 function Controls({ view, onView }) {
   return (
     <Segmented
@@ -500,7 +602,7 @@ function TrendBars({ history }) {
   const last = timeParts(series[series.length - 1].time);
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 mt-5 pt-1">
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="label-caps">PM2.5 · last {series.length} hrs</span>
         <span className="text-[11px] tabular-nums text-ink-muted">{trend}</span>
@@ -604,7 +706,7 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
     const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
     return (
       <Section title="Source">
-        <p className="text-[11px] leading-snug text-ink">
+        <p className="mb-3 pb-1 text-[11px] leading-snug text-ink">
           <strong>Detected from a PM2.5 air monitor</strong> — the{' '}
           <strong>{measured.reportingArea}</strong> reporting area
           {measured.distanceMi != null && <> ({measured.distanceMi} mi away)</>}, {measured.observedAt},
@@ -728,15 +830,10 @@ function Readout({ result, view, hidden, onToggle, source }) {
   const modelForCompare = result.fallback ? null : modeled;
 
   return (
-    // The cap tracks the diagram beside it: the pollutant view stacks two ring
-    // canvases (~2× as tall as the single source canvas), so its readout gets
-    // more room before scrolling. Fixed px, not vh — see the preview quirk in
-    // CLAUDE.md.
-    <div
-      className={`${
-        view === 'rings' ? 'max-h-[820px]' : 'max-h-[560px]'
-      } overflow-y-auto rounded-lg border border-grid-strong bg-cream/60 p-5`}
-    >
+    // The cap tracks the diagram beside it. Fixed px, not vh — see the preview
+    // quirk in CLAUDE.md. One ring canvas now (carousel), so the readout can
+    // stay at the same height as the source view.
+    <div className="max-h-[560px] overflow-y-auto rounded-lg border border-grid-strong bg-cream/60 p-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-display text-2xl italic">{location.name}</h3>
         {/* Provenance settled BEFORE the number is read. */}
