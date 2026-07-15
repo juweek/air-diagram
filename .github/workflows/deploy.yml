@@ -49,7 +49,10 @@ jobs:
         run: npm run build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
-          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+          # The AirNow-backed features (Measured headline + Live-AQI map) call
+          # these serverless functions, which live on Vercel — GitHub Pages can't
+          # run them. Point the static build at the Vercel deployment.
+          VITE_API_BASE: https://air-diagram.vercel.app
 
       # SPA routing: GitHub Pages has no rewrite rule, so a deep link like
       # /<repo>/Detroit 404s. Serving index.html as 404.html lets the app boot

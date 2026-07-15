@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAsync } from '../lib/useAsync';
 import { getByQuery } from '../data/airQuality';
@@ -126,13 +127,13 @@ export default function AirPage() {
           <br />
           in the air.
         </h2>
-
-        <HeroBars />
-
         <p className="mx-auto mb-7 mt-6 max-w-prose font-display text-lg leading-relaxed text-ink-muted">
           The legal line for clean air is far looser than is actually healthy. Search a place to see
           its air quality, drawn particle by particle.
         </p>
+
+        <HeroBars />
+
 
         {/* Search and "try someplace new" share one centered row. */}
         <div className="mx-auto flex max-w-2xl flex-wrap items-end justify-center gap-x-5 gap-y-3">
@@ -148,7 +149,7 @@ export default function AirPage() {
             onClick={() => navigate(`/${encodeURIComponent(randomPlace(query.toLowerCase()))}`)}
             className="label-caps shrink-0 rounded-full border border-grid-strong px-4 py-2 !text-ink transition-colors hover:!border-ink hover:!text-ink-bright"
           >
-            ↺ Try someplace new
+            ↺ Random
           </button>
         </div>
 
@@ -325,17 +326,61 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
-/* ── Tip: a small hover tooltip. Pure CSS (group-hover), so it costs nothing
-   and works on any inline chip/label. Hidden on touch (no hover) — the copy a
-   tooltip carries must never be the ONLY place a fact lives. ──────────────── */
+/* ── Tip: a small hover tooltip. Portaled to document.body with fixed coords so
+   the readout’s overflow-y-auto can’t clip it. Hidden on touch (no hover) — the
+   copy a tooltip carries must never be the ONLY place a fact lives. ───────── */
 function Tip({ text, children }) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null);
+  const triggerRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const update = () => {
+      const r = triggerRef.current.getBoundingClientRect();
+      const width = 240; // w-60
+      const gap = 6;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const placeBelow = spaceBelow > 140 || r.top < 140;
+      const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
+      setCoords({
+        left,
+        top: placeBelow ? r.bottom + gap : undefined,
+        bottom: placeBelow ? undefined : window.innerHeight - r.top + gap,
+      });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open]);
+
   if (!text) return children;
   return (
-    <span className="group/tip relative inline-flex">
+    <span
+      ref={triggerRef}
+      className="relative inline-flex"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
       {children}
-      <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden w-60 -translate-x-1/2 rounded-md border border-grid-strong bg-cream px-2.5 py-2 text-left text-[11px] font-normal normal-case leading-snug tracking-normal text-ink shadow-xl group-hover/tip:block">
-        {text}
-      </span>
+      {open &&
+        coords &&
+        createPortal(
+          <span
+            role="tooltip"
+            className="pointer-events-none fixed z-[100] w-60 rounded-md border border-grid-strong bg-cream px-2.5 py-2 text-left text-[11px] font-normal normal-case leading-snug tracking-normal text-ink shadow-xl"
+            style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
+          >
+            {text}
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }
@@ -554,7 +599,7 @@ function SourceLink({ source }) {
   );
 }
 
-function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor, source }) {
+function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor }) {
   if (measured) {
     const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
     return (
@@ -593,7 +638,6 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
             })}
           </div>
         )}
-        <SourceLink source={source} />
       </Section>
     );
   }
@@ -607,7 +651,6 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
           {result.fallback.distanceMi} mi away, 2024) — a stand-in for the usual air here, not
           today’s reading.
         </p>
-        <SourceLink source={source} />
       </Section>
     );
   }
@@ -616,7 +659,6 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
     return (
       <Section title="About this scenario">
         <p className="text-xs leading-relaxed text-ink-muted">{result.blurb}</p>
-        <SourceLink source={source} />
       </Section>
     );
   }
@@ -644,7 +686,6 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
           over that gap. Only ~1 in 5 US counties has one at all.
         </p>
       )}
-      <SourceLink source={source} />
     </Section>
   );
 }
@@ -707,8 +748,9 @@ function Readout({ result, view, hidden, onToggle, source }) {
       </div>
 
       <AqiMeter aqi={displayAqi} category={category} />
+      <SourceLink source={source} />
 
-      {/* Provenance + source, directly under the reading. */}
+      {/* Provenance, directly under the reading — above the dividing rule. */}
       <ProvenanceSection
         measured={measured}
         modeled={modeled}
@@ -716,7 +758,6 @@ function Readout({ result, view, hidden, onToggle, source }) {
         current={current}
         nowcast={nowcast}
         monitor={monitor}
-        source={source}
       />
 
       <TrendBars history={result.history} />
@@ -895,11 +936,6 @@ function SourceLegend({ current, mode, hidden, onToggle }) {
         By volume a breath is ~78% nitrogen, ~21% oxygen and ~1% argon. Everything leftover is
         pollution (well under 0.01% of the air).
       </p>
-      <p className="mb-2 rounded-md bg-cream/60 px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
-        These buckets are the <strong>modeled</strong> makeup of the fine-particle (PM2.5) mass —
-        what the particles likely are, not the gases. “Sulfate &amp; nitrate haze,” for instance, is
-        the particle that forms when SO₂ and NO₂ gases react in the air.
-      </p>
       {/* Percentages only — the raw speck counts are rendering density (they
           change with screen size), so quoting them as data was false precision. */}
       <ul className="grid gap-0.5">
@@ -911,7 +947,7 @@ function SourceLegend({ current, mode, hidden, onToggle }) {
         {breakdown.ultrafine > 0 && (
           <li className="mt-0.5">
             <LegendRow
-              entry={{ ...ULTRAFINE, label: 'Ultrafine — never counted' }}
+              entry={{ ...ULTRAFINE, label: 'Ultrafine' }}
               off={hidden.includes(ULTRAFINE.key)}
               onToggle={onToggle}
               rose
@@ -921,11 +957,12 @@ function SourceLegend({ current, mode, hidden, onToggle }) {
           </li>
         )}
       </ul>
-      <p className="mt-3 text-xs leading-relaxed text-ink-muted">
-        Percentages are the share of the modeled particle mass, scaled against the{' '}
-        <strong>US legal line (9 µg/m³)</strong>. Ultrafine is extra: particles so small they never
-        enter the official mass number, so they don’t count toward the 100% above. The swarm drawn is
-        a modeled intensity, not a count.
+      <p className="mt-3 border-t border-grid-strong/60 pt-2 text-[10px] leading-snug text-ink-muted">
+        The swarm drawn is a modeled intensity, not a count. These buckets are the modeled makeup of
+        the fine-particle (PM2.5) mass — what the particles likely are, not the gases. Percentages
+        are the share of the modeled particle mass, scaled against the US legal line (9 µg/m³).
+        Ultrafine are so small they never enter the official mass number, so they don’t count toward
+        the 100%.
       </p>
     </div>
   );
@@ -964,13 +1001,6 @@ function PollutantList({ current }) {
         These are the six pollutants regulators <strong>measure directly</strong> — each a real
         concentration (SO₂ here is the <em>gas</em>). Contrast with <strong>By source</strong>,
         which <em>models</em> what the PM2.5 particle mass is made of.
-      </p>
-      <p className="mb-2 text-xs text-ink-muted">
-        Three bars per pollutant, on that pollutant’s own scale: <strong>today’s air</strong>,
-        then where the <strong>WHO health line</strong> and the looser <strong>US legal line</strong>{' '}
-        sit. When the top bar reaches past a line’s bar, the air is over that line. The lines use
-        different averaging periods (annual, 24-hr, hourly) — read them as scale, not a compliance
-        ruling.
       </p>
       <ul className="grid gap-3">
         {POLLUTANTS.map((def) => {

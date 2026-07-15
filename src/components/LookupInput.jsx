@@ -9,7 +9,7 @@ import { useState } from 'react';
 export default function LookupInput({
   onSubmit,
   defaultValue = '',
-  placeholder = 'a ZIP code or city — e.g. 48226 or Detroit',
+  placeholder = 'a ZIP code or city (48226 or Detroit)',
   buttonLabel = 'Search',
   large = false, // landing-hero treatment: bigger type, labelled submit
 }) {
