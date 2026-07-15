@@ -2,26 +2,27 @@
 //
 // Two honest, cheap pieces (no dataset, no network):
 //
-//  1. WHERE IS THE SUN — solar elevation from lat/lon + the current UTC time,
-//     using the NOAA "General Solar Position Calculations" approximation
-//     (fractional-year → equation of time + declination → hour angle →
-//     elevation). Accurate to ~0.1–0.2°, which is far finer than any color
-//     step below can show. No timezone lookup needed: the math runs in UTC and
-//     longitude carries the local solar time.
+//  1. WHERE IS THE SUN — solar elevation + hour angle from lat/lon + the current
+//     UTC time, using the NOAA "General Solar Position Calculations"
+//     approximation (fractional-year → equation of time + declination → hour
+//     angle → elevation). Accurate to ~0.1–0.2°, which is far finer than any
+//     color step below can show. No timezone lookup needed: the math runs in
+//     UTC and longitude carries the local solar time. Hour angle tells dawn
+//     from dusk at the same elevation (morning vs afternoon).
 //
-//  2. WHAT COLOR IS THAT — a gradient ramp keyed to the standard twilight
-//     phases (civil −6°, nautical −12°, astronomical −18°, plus golden hour
-//     and full day). A physical scattering model (Preetham / Hosek-Wilkie)
-//     would be more "accurate" but costs a shader pipeline and would render a
-//     white-blue noon sky the luminous particles could never survive on. So
-//     the ramp is deliberately TONE-MAPPED DARK — the hue and the day/night
-//     arc are real; the brightness is capped so the additive orbs stay legible
-//     (that's also why the toggle defaults to charcoal).
+//  2. WHAT COLOR IS THAT — a gradient ramp keyed to twilight phases plus a
+//     distinct high-noon wash. A physical scattering model (Preetham /
+//     Hosek-Wilkie) would be more "accurate" but costs a shader pipeline and
+//     would render a white-blue noon sky the luminous particles could never
+//     survive on. So the ramp is deliberately TONE-MAPPED DARK — the hue and
+//     the day/night arc are real; the brightness is capped so the additive
+//     orbs stay legible (that's also why the toggle defaults to charcoal).
 
 const RAD = Math.PI / 180;
 
-// Solar elevation in degrees (negative = below the horizon).
-export function solarElevationDeg(latDeg, lonDeg, date = new Date()) {
+// { elevationDeg, hourAngleDeg }. hourAngleDeg < 0 → morning (sun rising);
+// > 0 → afternoon (sun setting). ~0 at local solar noon.
+export function solarPosition(latDeg, lonDeg, date = new Date()) {
   const startOfYear = Date.UTC(date.getUTCFullYear(), 0, 1);
   const dayOfYear = (date.getTime() - startOfYear) / 86400000;
   const hourUTC =
@@ -53,12 +54,17 @@ export function solarElevationDeg(latDeg, lonDeg, date = new Date()) {
   const lat = latDeg * RAD;
   const cosZenith =
     Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(hourAngle);
-  return 90 - Math.acos(Math.min(1, Math.max(-1, cosZenith))) / RAD;
+  const elevationDeg = 90 - Math.acos(Math.min(1, Math.max(-1, cosZenith))) / RAD;
+  return { elevationDeg, hourAngleDeg: hourAngle / RAD };
 }
 
-// Keyframes: sun elevation → [top, mid, horizon] RGB. The elevations are the
-// astronomical twilight-phase boundaries; the colors are those phases' skies,
-// dimmed to sit behind additive glow (max channel ≈ 175 even at noon).
+// Solar elevation in degrees (negative = below the horizon).
+export function solarElevationDeg(latDeg, lonDeg, date = new Date()) {
+  return solarPosition(latDeg, lonDeg, date).elevationDeg;
+}
+
+// Keyframes: sun elevation → [top, mid, horizon] RGB. Twilight boundaries plus
+// a washed high-noon so midday isn't just "brighter morning blue".
 const SKY_KEYS = [
   { e: -90, top: [5, 6, 14], mid: [7, 8, 18], hor: [10, 11, 22] }, // deep night
   { e: -18, top: [6, 8, 18], mid: [9, 11, 24], hor: [14, 15, 30] }, // astronomical
@@ -66,12 +72,40 @@ const SKY_KEYS = [
   { e: -6, top: [13, 18, 42], mid: [34, 32, 64], hor: [96, 58, 54] }, // civil
   { e: 0, top: [26, 34, 66], mid: [80, 56, 78], hor: [190, 110, 60] }, // sunrise/set
   { e: 6, top: [42, 62, 102], mid: [92, 98, 120], hor: [186, 142, 92] }, // golden hour
-  { e: 20, top: [50, 84, 134], mid: [88, 122, 160], hor: [140, 150, 160] }, // morning
-  { e: 90, top: [56, 100, 158], mid: [104, 142, 182], hor: [158, 172, 182] }, // midday
+  { e: 18, top: [48, 78, 128], mid: [90, 118, 152], hor: [148, 152, 158] }, // morning / late afternoon
+  { e: 35, top: [52, 92, 148], mid: [100, 134, 172], hor: [150, 164, 178] }, // late morning
+  // High noon: washed, brighter zenith, cooler horizon — distinct from "day".
+  { e: 55, top: [72, 118, 168], mid: [118, 152, 188], hor: [168, 178, 188] },
+  { e: 90, top: [78, 124, 172], mid: [124, 158, 192], hor: [172, 182, 190] },
 ];
+
+// Dusk bias (afternoon twilight): warmer / redder horizon than the shared ramp.
+const DUSK_BIAS = {
+  top: [8, -4, -10],
+  mid: [18, -6, -14],
+  hor: [28, -8, -22],
+};
+// Dawn bias (morning twilight): cooler / pinker.
+const DAWN_BIAS = {
+  top: [-4, 2, 8],
+  mid: [6, -2, 4],
+  hor: [12, 4, -6],
+};
 
 const lerp = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+function applyDayPartBias(stops, elevationDeg, afternoon) {
+  // Only color-shift around twilight / golden hour, where dawn ≠ dusk.
+  if (elevationDeg > 18 || elevationDeg < -14) return stops;
+  const bias = afternoon ? DUSK_BIAS : DAWN_BIAS;
+  // Peak bias near the horizon (e≈0); fade out by ±18°.
+  const t = clamp01(1 - Math.abs(elevationDeg) / 18) * 0.85;
+  const keys = ['top', 'mid', 'hor'];
+  return stops.map((s, i) =>
+    s.map((v, c) => Math.round(Math.min(255, Math.max(0, v + bias[keys[i]][c] * t))))
+  );
+}
 
 // A cloudy sky loses its blue and flattens toward grey; rain darkens the whole
 // vault. Both are applied AFTER the clear-sky ramp so the sun's arc still shows
@@ -105,8 +139,10 @@ function applyWeather(stops, weather) {
   return out.map((s) => s.map((v) => Math.round(Math.min(255, Math.max(0, v)))));
 }
 
-// Elevation (+ optional weather) → three gradient stops [top, mid, horizon].
-export function skyStops(elevationDeg, weather = null) {
+// Elevation (+ optional weather + morning/afternoon) → three gradient stops.
+// `opts.afternoon` (default false) separates dusk from dawn at the same elev.
+export function skyStops(elevationDeg, weather = null, opts = {}) {
+  const afternoon = !!opts.afternoon;
   const e = Math.min(90, Math.max(-90, elevationDeg));
   let lo = SKY_KEYS[0];
   let hi = SKY_KEYS[SKY_KEYS.length - 1];
@@ -118,7 +154,8 @@ export function skyStops(elevationDeg, weather = null) {
     }
   }
   const t = hi.e === lo.e ? 0 : (e - lo.e) / (hi.e - lo.e);
-  const clear = [lerp(lo.top, hi.top, t), lerp(lo.mid, hi.mid, t), lerp(lo.hor, hi.hor, t)];
+  let clear = [lerp(lo.top, hi.top, t), lerp(lo.mid, hi.mid, t), lerp(lo.hor, hi.hor, t)];
+  clear = applyDayPartBias(clear, e, afternoon);
   return applyWeather(clear, weather);
 }
 
@@ -141,17 +178,22 @@ function wmoLabel(code) {
   return null;
 }
 
+// Phase word when we lack a wall-clock — dawn ≠ dusk via `afternoon`.
+function phaseWord(elevationDeg, afternoon) {
+  const e = elevationDeg;
+  if (e < -12) return 'Night';
+  if (e < -6) return afternoon ? 'Dusk' : 'Dawn';
+  if (e < 3) return afternoon ? 'Sunset' : 'Sunrise';
+  if (e < 12) return afternoon ? 'Golden hour' : 'Golden hour';
+  if (e < 35) return afternoon ? 'Afternoon' : 'Morning';
+  if (e < 55) return afternoon ? 'Late afternoon' : 'Late morning';
+  return 'High noon';
+}
+
 // The place's current wall-clock time, e.g. "3:47 pm", from the UTC offset the
 // weather feed reports. Falls back to a phase-of-day word if we have no offset.
-function localClock(elevationDeg, utcOffsetSec) {
-  if (utcOffsetSec == null) {
-    const e = elevationDeg;
-    if (e < -12) return 'Night';
-    if (e < -6) return 'Twilight';
-    if (e < 3) return e < 0 ? 'Dusk' : 'Sunrise / sunset';
-    if (e < 12) return 'Golden hour';
-    return 'Daytime';
-  }
+function localClock(elevationDeg, utcOffsetSec, afternoon) {
+  if (utcOffsetSec == null) return phaseWord(elevationDeg, afternoon);
   const d = new Date(Date.now() + utcOffsetSec * 1000);
   const h = d.getUTCHours();
   const m = d.getUTCMinutes();
@@ -161,9 +203,16 @@ function localClock(elevationDeg, utcOffsetSec) {
 }
 
 // A one-line "what the sky is doing" caption for the toggle: local clock time,
-// current conditions from WMO, temperature. e.g. "5:12 pm · mostly clear · 83°F".
-export function skyCaption(elevationDeg, weather) {
-  const parts = [localClock(elevationDeg, weather?.utcOffsetSec)];
+// phase when useful, conditions from WMO, temperature.
+// e.g. "12:08 pm · high noon · mostly clear · 83°F"
+export function skyCaption(elevationDeg, weather, opts = {}) {
+  const afternoon = !!opts.afternoon;
+  const parts = [localClock(elevationDeg, weather?.utcOffsetSec, afternoon)];
+  // When we have a clock, still name the phase so noon / dusk read as such.
+  if (weather?.utcOffsetSec != null) {
+    const phase = phaseWord(elevationDeg, afternoon).toLowerCase();
+    if (phase !== 'morning' && phase !== 'afternoon') parts.push(phase);
+  }
   const cond = wmoLabel(weather?.code);
   if (cond) parts.push(cond);
   else if (weather?.cloudCover != null) {

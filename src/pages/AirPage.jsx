@@ -12,7 +12,7 @@ import GourmetMediaContainer from '../components/GourmetMediaContainer';
 import { Loading, ErrorState } from '../components/Status';
 import P5Sketch from '../viz/P5Sketch';
 import { airParticleSketch } from '../viz/airParticleSketch';
-import { solarElevationDeg, skyStops, skyCaption } from '../lib/sky';
+import { solarPosition, skyStops, skyCaption } from '../lib/sky';
 
 // Open-Meteo serves CAMS *model* output on an ~11 km grid — an estimate, not a
 // monitor reading. The label says so: the tool must not commit the sin the
@@ -121,16 +121,19 @@ export default function AirPage() {
   // Scenarios have no coordinates — there is no "there" to have a sky over.
   const skyCapable = location?.latitude != null;
   // The sun's current elevation at the place drives the phase-of-day color; the
-  // live weather (cloud cover, rain) tints it — overcast greys it, rain darkens
-  // it. Both feed the caption under the toggle so the reader can read the sky.
-  const elevation = skyCapable
-    ? solarElevationDeg(location.latitude, location.longitude)
+  // hour angle separates dawn from dusk at the same elevation. Live weather
+  // (cloud cover, rain) tints it — overcast greys it, rain darkens it. Both
+  // feed the caption under the toggle so the reader can read the sky.
+  const sun = skyCapable
+    ? solarPosition(location.latitude, location.longitude)
     : null;
+  const elevation = sun?.elevationDeg ?? null;
+  const afternoon = sun != null ? sun.hourAngleDeg > 0 : false;
   const sky = useMemo(
-    () => (showSky && skyCapable ? skyStops(elevation, weather) : null),
-    [showSky, skyCapable, elevation, weather]
+    () => (showSky && skyCapable ? skyStops(elevation, weather, { afternoon }) : null),
+    [showSky, skyCapable, elevation, weather, afternoon]
   );
-  const skyLabel = skyCapable ? skyCaption(elevation, weather) : null;
+  const skyLabel = skyCapable ? skyCaption(elevation, weather, { afternoon }) : null;
 
   // Stable objects so each P5Sketch only remounts on a real data change.
   // Source/pollutants/baseline: one canvas. Rings: a single ring canvas for
@@ -242,7 +245,7 @@ export default function AirPage() {
                 <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
               </div>
             )}
-            <aside className="w-full flex-1 basis-[260px]">
+            <aside className="mt-4 w-full flex-1 basis-[260px] border-t border-grid-strong pt-6 sm:mt-0 sm:border-t-0 sm:pt-0">
               {hasResult ? (
                 // Keyed by place so the pollutant-focus selection (and any
                 // scroll) resets when the reader jumps somewhere new.
@@ -387,8 +390,8 @@ function RingPanel({ label, data }) {
 }
 
 /* ── Controls: the "View" toggle. Three cuts of the same air:
-     • Where did the particles come from? — modeled PM2.5 origins.
-     • What pollutants are there — gases as haze, PM as orbs (matched colors).
+     • Particulates — modeled PM2.5 origins.
+     • Pollutants — gases as haze, PM as orbs (matched colors).
      • What's in a breath of air? — concentric rings of the PM2.5 source mix.
    ─────────────────────────────────────────────────────────────────────────── */
 function Controls({ view, onView }) {
@@ -397,8 +400,8 @@ function Controls({ view, onView }) {
       value={view}
       onChange={onView}
       options={[
-        { value: 'source', label: 'Where did the particles come from?' },
-        { value: 'pollutants', label: 'What pollutants are there' },
+        { value: 'source', label: 'Particulates' },
+        { value: 'pollutants', label: 'Pollutants' },
         { value: 'rings', label: "What's in a breath of air?" },
       ]}
     />
@@ -518,15 +521,25 @@ function IconPie({ className = 'h-[18px] w-[18px]' }) {
     </svg>
   );
 }
-function SafetyCount({ n }) {
-  const hot = n > 0;
+function SafetyCount({ n, level = 'ok' }) {
+  // ok = all under WHO · who = over WHO health line · legal = over US legal line
+  const styles =
+    level === 'legal'
+      ? 'bg-[#D6392F] text-cream'
+      : level === 'who'
+        ? 'bg-[#C7A70A] text-[#1f1c19]'
+        : 'bg-ink/15 text-ink-muted';
+  const tip =
+    level === 'legal'
+      ? `${n} pollutant${n === 1 ? '' : 's'} over the US legal line`
+      : level === 'who'
+        ? `${n} pollutant${n === 1 ? '' : 's'} over the WHO health line`
+        : 'None over the WHO health line';
   return (
     <span
-      className={`flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${
-        hot ? 'bg-[#D6392F] text-cream' : 'bg-ink/15 text-ink-muted'
-      }`}
-      title={hot ? `${n} pollutant${n === 1 ? '' : 's'} over the WHO health line` : 'None over the WHO health line'}
-      aria-label={hot ? `${n} over the health line` : 'All under the health line'}
+      className={`flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${styles}`}
+      title={tip}
+      aria-label={tip}
     >
       {n}
     </span>
@@ -938,8 +951,8 @@ function MeasuredPills({ measured, focus, onPick }) {
 
 /* ── MeasuredComparisonSection: CAMS model vs a real monitor reading, each on
    the FULL 0–500 EPA color scale (the odometer unrolled flat) with a ▼ caret
-   at the reading. Always shown when a live model number exists — if no monitor
-   is nearby the "measured" bar stays empty so the gap itself is the point.
+   at the reading. Only render a bar when that side has a value — no empty
+   "unfocused" stub for a missing monitor or model reading.
    When a pollutant chip is focused above, both bars follow it: the model bar
    shows that pollutant's CAMS sub-index, the monitor bar its AirNow reading
    (AirNow only reports PM2.5 / O₃ / PM10). ─────────────────────────────────── */
@@ -951,7 +964,6 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
   let measuredLabel = measured
     ? `Monitor (${measured.reportingArea}${measured.distanceMi != null ? ` · ${measured.distanceMi} mi` : ''})`
     : 'Monitor';
-  let measuredEmpty = 'No nearby AirNow reading';
 
   if (focus) {
     const keys = FOCUS_KEYS[focus.label];
@@ -961,18 +973,13 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
     }
     modelLabel = `CAMS model (${focus.label})`;
     measuredAqi = keys.airnow ? (measured?.parameters?.[keys.airnow]?.aqi ?? null) : null;
-    if (measuredAqi == null) {
-      measuredLabel = `Monitor (${focus.label})`;
-      measuredEmpty = measured
-        ? `AirNow doesn’t report ${focus.label} here`
-        : 'No nearby AirNow reading';
-    } else if (measured) {
+    if (measuredAqi != null && measured) {
       measuredLabel = `Monitor (${focus.label} · ${measured.reportingArea}${measured.distanceMi != null ? ` · ${measured.distanceMi} mi` : ''})`;
-    } else {
+    } else if (measuredAqi != null) {
       measuredLabel = `Monitor (${focus.label})`;
     }
   }
-  if (modelAqi == null && measuredAqi == null && !focus) return null;
+  if (modelAqi == null && measuredAqi == null) return null;
   // Zoom the axis to 300 unless a reading actually reaches into the top bands —
   // most days both bars live under 150, and a fixed 0–500 scale squashed them
   // into indistinguishable stubs. Only stretch to 500 when something needs it.
@@ -981,13 +988,8 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
   return (
     <Section title="What’s been measured?" icon={<IconBars />}>
       <div className="grid gap-3">
-        <CompareBar label={modelLabel} value={modelAqi} top={top} />
-        <CompareBar
-          label={measuredLabel}
-          value={measuredAqi}
-          top={top}
-          emptyLabel={measuredEmpty}
-        />
+        {modelAqi != null && <CompareBar label={modelLabel} value={modelAqi} top={top} />}
+        {measuredAqi != null && <CompareBar label={measuredLabel} value={measuredAqi} top={top} />}
       </div>
       <p className="mt-2 text-[10px] leading-snug text-ink-muted">
         Most phone apps show the CAMS model. The particle makeup below is modeled from that CAMS
@@ -1122,13 +1124,22 @@ function Readout({ result, view, hidden, onToggle, source }) {
         />
       </div>
 
-      <AqiMeter
-        aqi={shownAqi}
-        category={category}
-        focusLabel={focus?.label}
-        onClearFocus={() => setFocus(null)}
-      />
-      <MeasuredPills measured={measured} focus={focus} onPick={pickFocus} />
+      <AqiMeter aqi={shownAqi} category={category} />
+      {/* The pollutant pills sit directly under the gauge — clicking one focuses
+         the gauge on it and dims the rest (click again to release; no separate
+         "only" button). AirNow's three chips when measured, else the six CAMS
+         sub-indices. */}
+      {measured ? (
+        <MeasuredPills measured={measured} focus={focus} onPick={pickFocus} />
+      ) : (
+        <SubIndexStrip
+          current={current}
+          driver={modeled.driver}
+          nowcast={nowcast}
+          focus={focus}
+          onPick={pickFocus}
+        />
+      )}
       <SourceLink source={source} />
 
       {/* Provenance, directly under the reading — above the dividing rule. */}
@@ -1142,9 +1153,7 @@ function Readout({ result, view, hidden, onToggle, source }) {
         focus={focus}
         onPick={pickFocus}
       />
-      <TrendBars history={result.history} source={historySource} />
-
-      {modelForCompare?.aqi != null && (
+      {(modelForCompare?.aqi != null || measured) && (
         <MeasuredComparisonSection
           modeled={modelForCompare}
           measured={measured}
@@ -1154,7 +1163,7 @@ function Readout({ result, view, hidden, onToggle, source }) {
           source={aqiSource}
         />
       )}
-
+      <TrendBars history={result.history} source={historySource} />
 
       {/* What the headline AQI means for the reader's day — a peer section of
          "What's the trend?" / "What's been measured". Keyed to the OVERALL
@@ -1323,7 +1332,7 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
       <Section title="What’s in this breath" icon={<IconPie />}>
         <p className="text-xs leading-relaxed text-ink-muted">
           The source breakdown needs the live pollutant mix (NO₂, SO₂, dust…), which isn’t available
-          right now. Switch to <strong>What pollutants are there</strong> to see the PM2.5 mass we do have.
+          right now. Switch to <strong>Pollutants</strong> to see the PM2.5 mass we do have.
         </p>
       </Section>
     );
@@ -1383,18 +1392,40 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
    width. ─────────────────────────────────────────────────────────────────── */
 const SLIVER_PCT = 0.5; // drawn width of the pollutant sliver — VISUAL ONLY
 
+// The real composition of dry air by volume. N₂/O₂ dominate; argon is a thin
+// but honest ~0.9%; everything else (CO₂, trace gases AND all pollution) is the
+// rest. We draw these to their true proportions and only exaggerate the
+// pollutant sliver — so the bar can't lie about how little of a breath is
+// anything but N₂ and O₂. Nitrogen green (per the brand), oxygen blue, argon a
+// neutral grey.
+const AIR_GASES = [
+  { key: 'n2', label: 'N₂', full: 'Nitrogen', pct: 78.09, color: '#57B36F' },
+  { key: 'o2', label: 'O₂', full: 'Oxygen', pct: 20.95, color: '#5B8DEF' },
+  { key: 'ar', label: 'Ar', full: 'Argon', pct: 0.93, color: '#9AA0A6' },
+];
+const AIR_TOTAL = AIR_GASES.reduce((a, g) => a + g.pct, 0);
+
 function BreathBars({ sources }) {
   return (
     <div className="mb-3 mt-1" aria-hidden>
-      {/* Bar 1 — the breath: clean gases vs the (exaggerated) pollutant sliver */}
+      {/* Bar 1 — the breath itself, to true proportion: N₂ | O₂ | Ar, then the
+          (exaggerated) pollutant sliver. The gas widths share the space left by
+          the sliver, so the segments stay in real ratio to each other. */}
       <div className="flex h-7 overflow-hidden rounded-sm border border-grid-strong/70">
+        {AIR_GASES.map((g) => (
+          <div
+            key={g.key}
+            title={`${g.full} (${g.label}) · ${g.pct}%`}
+            className="flex items-center justify-center overflow-hidden text-[10px] font-semibold leading-none text-[#1f1c19]"
+            style={{ width: `${((100 - SLIVER_PCT) * g.pct) / AIR_TOTAL}%`, background: g.color }}
+          >
+            {g.pct >= 5 ? `${g.label} ${Math.round(g.pct)}%` : ''}
+          </div>
+        ))}
         <div
-          className="flex items-center justify-center bg-ink/15 text-[10px] leading-none text-ink"
-          style={{ width: `${100 - SLIVER_PCT}%` }}
-        >
-          clean air — N₂ · O₂ · Ar (~99.99%)
-        </div>
-        <div style={{ width: `${SLIVER_PCT}%`, background: 'rgb(var(--accent))' }} />
+          title="Pollution · under 0.01% (drawn larger to be visible)"
+          style={{ width: `${SLIVER_PCT}%`, background: 'rgb(var(--accent))' }}
+        />
       </div>
 
       {/* Dashed connectors: the sliver's edges fan out to bar 2's full width.
@@ -1440,8 +1471,9 @@ function BreathBars({ sources }) {
       </div>
 
       <p className="mt-1.5 text-[10px] leading-snug text-ink-muted">
-        The pollutant sliver is really under 0.01% of the breath — drawn at {SLIVER_PCT}% just to
-        be visible. The lower bar zooms that sliver into its modeled sources.
+        The top bar is a breath by volume — ~78% N₂, ~21% O₂, ~0.9% argon. The pollutant sliver at
+        its end is really under 0.01%, drawn at {SLIVER_PCT}% just to be visible; the lower bar zooms
+        that sliver into its modeled sources.
       </p>
     </div>
   );
@@ -1473,22 +1505,30 @@ function LegendRow({ entry, off, onToggle, rose, children }) {
 }
 
 function PollutantList({ current, source }) {
-  const overWho = POLLUTANTS.reduce((n, def) => {
+  // US legal is the looser line — over-legal ⊆ over-WHO for the same pollutant.
+  // Badge count = over WHO; color escalates to red when any also clear US legal.
+  let overWho = 0;
+  let overLegal = 0;
+  for (const def of POLLUTANTS) {
     const value = current[def.key];
-    return value != null && value > def.who ? n + 1 : n;
-  }, 0);
+    if (value == null) continue;
+    if (value > def.who) overWho += 1;
+    if (value > def.legal) overLegal += 1;
+  }
+  const level = overLegal > 0 ? 'legal' : overWho > 0 ? 'who' : 'ok';
 
   return (
     <Section
       title="Is this safe?"
-      icon={<SafetyCount n={overWho} />}
+      icon={<SafetyCount n={overWho} level={level} />}
     >
       <p className="mb-2 rounded-md bg-cream/60 px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
         Each row’s color matches the field. <strong>Gases</strong> (O₃, NO₂, SO₂, CO) draw as soft
         haze; <strong>particles</strong> (PM2.5, PM10, dust) draw as orbs sized by diameter. Counts
         track relative abundance — not the legal line. Contrast with{' '}
-        <strong>Where did the particles come from?</strong>, which models what the PM2.5 mass is made
-        of. The badge counts how many sit over the WHO health line.
+        <strong>Particulates</strong>, which models what the PM2.5 mass is made of. The badge counts
+        how many sit over the WHO health line (yellow) — and turns red if any also clear the US
+        legal line.
       </p>
       <ul className="grid gap-3">
         {POLLUTANTS.map((def) => {

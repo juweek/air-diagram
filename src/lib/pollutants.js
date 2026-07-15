@@ -54,7 +54,8 @@ export const POLLUTANTS = [
     range: [20, 180],
     who: 100, // WHO 8-hour
     legal: 137, // EPA 8-hour NAAQS (0.070 ppm ≈ 137 µg/m³)
-    color: '#6FA6FF',
+    // Ozone is a gas — drawn as blue smoke in the pollutant field, not orbs.
+    color: '#5B90F0',
     blurb:
       'Ground-level ozone — formed when sunlight cooks traffic and industrial gases. A lung irritant that peaks on hot, still afternoons. N95 masks don’t filter it.',
   },
@@ -67,9 +68,8 @@ export const POLLUTANTS = [
     range: [0, 60],
     who: 25, // WHO 24-hour
     legal: 188, // EPA 1-hour NAAQS (100 ppb ≈ 188 µg/m³)
-    // Near-white: NO₂'s old red now clashed with PM2.5's blood-red, so the
-    // tailpipe gas reads as a bright neutral speck instead.
-    color: '#EDEAE0',
+    // Green — the tailpipe gas, drawn as green smoke in the pollutant field.
+    color: '#4FB06A',
     blurb:
       'Nitrogen dioxide — the signature gas of tailpipes and gas stoves. Inflames airways; a good tracer of fresh traffic exhaust near you.',
   },
@@ -82,7 +82,8 @@ export const POLLUTANTS = [
     range: [0, 20],
     who: 40, // WHO 24-hour
     legal: 196, // EPA 1-hour NAAQS (75 ppb ≈ 196 µg/m³)
-    color: '#5FD08A',
+    // Purple — sulfur gas, drawn as purple smoke in the pollutant field.
+    color: '#A66BD4',
     blurb:
       'Sulfur dioxide — from burning coal and oil. Irritating on its own, and the gas that later becomes sulfate haze particles downwind.',
   },
@@ -95,7 +96,8 @@ export const POLLUTANTS = [
     range: [50, 600],
     who: 4000, // WHO 24-hour (4 mg/m³)
     legal: 40000, // EPA 1-hour NAAQS (35 ppm ≈ 40 mg/m³)
-    color: '#E68AC9',
+    // Red — the combustion gas, drawn as red smoke in the pollutant field.
+    color: '#E8443A',
     blurb:
       'Carbon monoxide — an odorless combustion gas that binds to blood in place of oxygen. High indoors near flames; usually low outdoors.',
   },
