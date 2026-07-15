@@ -4,17 +4,18 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import GourmetMediaContainer from '../components/GourmetMediaContainer';
 import monitors from '../data/pm25Monitors.json';
 import usStates from '../data/usStates.json';
-import { buildCoverageGrid, COVERAGE_BANDS, COVERAGE_GAP, pointInUS } from '../lib/coverage';
+import { buildCoverageGrid, buildCountyCoverage, COVERAGE_BANDS, COVERAGE_GAP, pointInUS } from '../lib/coverage';
 import { apiUrl } from '../lib/apiBase';
 
 /**
- * THE MONITOR-GAP MAP — the compiled counter-dataset, drawn, in three modes:
+ * THE MONITOR-GAP MAP — the compiled counter-dataset, drawn, in four modes:
  *
- *   • Locations   — every active regulatory PM2.5 monitor as a plain dot.
+ *   • Locations    — every active regulatory PM2.5 monitor as a plain dot.
  *   • Live AQI     — the same monitors colored by their CURRENT AQI category
  *                    (via /api/monitor-status → AirNow), with a category filter.
- *   • Coverage gaps— a land grid colored by distance to the nearest monitor;
- *                    uncovered areas are left blank, so the holes ARE the gaps.
+ *   • Coverage gaps— a land grid colored by distance to the nearest monitor.
+ *   • By county    — the same distance bands as a county choropleth (center of
+ *                    each county → nearest monitor).
  *
  * A real WebGL map (MapLibre) with NO tile basemap: the only layers are a
  * bundled US-states outline and our own data. No token, no billing, no external
@@ -59,11 +60,12 @@ export default function MonitorMap() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [ready, setReady] = useState(false);
-  const [mode, setMode] = useState('locations'); // 'locations' | 'status' | 'coverage'
+  const [mode, setMode] = useState('locations'); // 'locations' | 'status' | 'coverage' | 'counties'
   const [hidden, setHidden] = useState(() => new Set()); // categories hidden in Live AQI
   const [statusGeo, setStatusGeo] = useState(null);
   const [statusMeta, setStatusMeta] = useState(null); // {counts, observedAt} or {error}
   const [coverageGeo, setCoverageGeo] = useState(null);
+  const [countyGeo, setCountyGeo] = useState(null);
 
   // Static monitor points (contiguous US), built once.
   const { points, shownCount, total } = useMemo(() => {
@@ -104,13 +106,21 @@ export default function MonitorMap() {
     map.on('load', () => {
       map.addSource('states', { type: 'geojson', data: usStates });
       map.addSource('coverage', { type: 'geojson', data: EMPTY });
+      map.addSource('counties', { type: 'geojson', data: EMPTY });
       map.addSource('monitors', { type: 'geojson', data: points });
       map.addSource('status', { type: 'geojson', data: EMPTY });
 
       map.addLayer({ id: 'states-fill', type: 'fill', source: 'states', paint: { 'fill-color': LAND, 'fill-opacity': 0.12 } });
-      // Coverage sits above land fill but below borders + dots. Opacity is
-      // per-feature so the deep-red gaps read stronger than the covered bands.
+      // Coverage sits above land fill but below borders + dots.
       map.addLayer({ id: 'coverage', type: 'fill', source: 'coverage', layout: { visibility: 'none' }, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.65 } });
+      map.addLayer({ id: 'counties', type: 'fill', source: 'counties', layout: { visibility: 'none' }, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.72 } });
+      map.addLayer({
+        id: 'counties-line',
+        type: 'line',
+        source: 'counties',
+        layout: { visibility: 'none' },
+        paint: { 'line-color': GROUND, 'line-width': 0.4, 'line-opacity': 0.35 },
+      });
       map.addLayer({ id: 'states-line', type: 'line', source: 'states', paint: { 'line-color': BORDER, 'line-width': 0.7, 'line-opacity': 0.35 } });
 
       const radius = ['interpolate', ['linear'], ['zoom'], 3, 2, 5, 3.5, 8, 7];
@@ -136,11 +146,13 @@ export default function MonitorMap() {
 
       map.fitBounds([[BBOX.minLon, BBOX.minLat], [BBOX.maxLon, BBOX.maxLat]], { padding: 24, duration: 0 });
 
-      // Hover popups for both dot layers.
-      const hover = (build) => (e) => {
+      // Hover popups for dots + county fills.
+      const hover = (build, isFill) => (e) => {
         map.getCanvas().style.cursor = 'pointer';
         const f = e.features?.[0];
-        if (f) popup.setLngLat(f.geometry.coordinates).setHTML(build(f.properties)).addTo(map);
+        if (!f) return;
+        const ll = isFill ? e.lngLat : f.geometry.coordinates;
+        popup.setLngLat(ll).setHTML(build(f.properties)).addTo(map);
       };
       const leave = () => {
         map.getCanvas().style.cursor = '';
@@ -148,11 +160,19 @@ export default function MonitorMap() {
       };
       const monHtml = (p) => `<strong>${p.name}</strong><br/><span style="color:${INK}">${p.county} County, ${p.state}</span>`;
       const statHtml = (p) => `<strong>AQI ${p.aqi}</strong> — ${CAT_BY_N[p.cat]?.name ?? '—'}`;
-      for (const [layer, build] of [['monitors', monHtml], ['status', statHtml]]) {
-        map.on('mouseenter', layer, hover(build));
-        map.on('mousemove', layer, hover(build));
+      const countyHtml = (p) =>
+        `<strong>${p.name} County, ${p.state}</strong><br/><span style="color:${INK}">~${p.miles} mi to nearest monitor</span>`;
+      for (const [layer, build] of [
+        ['monitors', monHtml],
+        ['status', statHtml],
+      ]) {
+        map.on('mouseenter', layer, hover(build, false));
+        map.on('mousemove', layer, hover(build, false));
         map.on('mouseleave', layer, leave);
       }
+      map.on('mouseenter', 'counties', hover(countyHtml, true));
+      map.on('mousemove', 'counties', hover(countyHtml, true));
+      map.on('mouseleave', 'counties', leave);
       // Size to the container now that it's laid out, and force the first paint.
       // (On mobile the map can init before the container has its final size,
       // which otherwise leaves the tiles blank until you interact with it.)
@@ -183,6 +203,8 @@ export default function MonitorMap() {
     if (!map || !ready) return;
     const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
     vis('coverage', mode === 'coverage');
+    vis('counties', mode === 'counties');
+    vis('counties-line', mode === 'counties');
     vis('monitors', mode === 'locations');
     vis('status', mode === 'status');
   }, [mode, ready]);
@@ -229,10 +251,9 @@ export default function MonitorMap() {
     }
   }, [statusGeo, ready]);
 
-  // ── Coverage: compute the grid the first time that mode is opened ────────────
+  // ── Coverage grid: compute the first time that mode is opened ───────────────
   useEffect(() => {
     if (mode !== 'coverage' || coverageGeo) return undefined;
-    // Defer a tick so the button state paints before the (~150ms) compute.
     const t = setTimeout(() => setCoverageGeo(buildCoverageGrid(0.5)), 0);
     return () => clearTimeout(t);
   }, [mode, coverageGeo]);
@@ -244,6 +265,29 @@ export default function MonitorMap() {
       map.triggerRepaint();
     }
   }, [coverageGeo, ready]);
+
+  // ── County choropleth: same bands, one polygon per county ───────────────────
+  useEffect(() => {
+    if (mode !== 'counties' || countyGeo) return undefined;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      buildCountyCoverage().then((geo) => {
+        if (!cancelled) setCountyGeo(geo);
+      });
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [mode, countyGeo]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready && countyGeo) {
+      map.getSource('counties')?.setData(countyGeo);
+      map.triggerRepaint();
+    }
+  }, [countyGeo, ready]);
 
   // ── category filter (Live AQI) ──────────────────────────────────────────────
   useEffect(() => {
@@ -292,7 +336,9 @@ export default function MonitorMap() {
           {mode === 'status' ? (
             <StatusLegend hidden={hidden} onToggle={toggleCat} meta={statusMeta} />
           ) : mode === 'coverage' ? (
-            <CoverageLegend ready={!!coverageGeo} />
+            <CoverageLegend ready={!!coverageGeo} kind="grid" />
+          ) : mode === 'counties' ? (
+            <CoverageLegend ready={!!countyGeo} kind="counties" />
           ) : (
             <p className="mt-3 text-sm text-ink-muted">
               <strong className="text-ink">{shownCount.toLocaleString()}</strong> active monitors
@@ -329,6 +375,7 @@ function ModeToggle({ mode, onMode }) {
     { value: 'locations', label: 'Locations' },
     { value: 'status', label: 'Live AQI' },
     { value: 'coverage', label: 'Coverage gaps' },
+    { value: 'counties', label: 'By county' },
   ];
   return (
     <div className="flex flex-col gap-1">
@@ -356,8 +403,8 @@ function StatusLegend({ hidden, onToggle, meta }) {
   if (meta?.error) {
     return (
       <p className="mt-3 text-sm text-ink-muted">
-        Live status is unavailable right now (the AirNow feed didn’t respond). Try “Locations” or
-        “Coverage gaps.”
+        Live status is unavailable right now (the AirNow feed didn’t respond). Try “Locations,”
+        “Coverage gaps,” or “By county.”
       </p>
     );
   }
@@ -393,18 +440,28 @@ function StatusLegend({ hidden, onToggle, meta }) {
   );
 }
 
-/* ── CoverageLegend: the distance bands + what a blank area means ───────────── */
-function CoverageLegend({ ready }) {
+/* ── CoverageLegend: the distance bands for grid or county choropleth ──────── */
+function CoverageLegend({ ready, kind = 'grid' }) {
+  const isCounty = kind === 'counties';
   return (
     <div className="mt-3">
       <p className="mb-1.5 text-sm text-ink-muted">
         {ready ? (
-          <>
-            Land shaded by distance to the <strong className="text-ink">nearest</strong> monitor. The
-            <strong className="text-ink"> deep-red</strong> land is{' '}
-            <strong className="text-ink">more than 150 miles</strong> from one — those are the gaps
-            your AQI is interpolated across.
-          </>
+          isCounty ? (
+            <>
+              Each county shaded by how far its <strong className="text-ink">center</strong> is from
+              the nearest monitor (same bands as Coverage gaps). Hover a county for the mile
+              figure. The <strong className="text-ink">deep-red</strong> counties are{' '}
+              <strong className="text-ink">more than 150 miles</strong> from one.
+            </>
+          ) : (
+            <>
+              Land shaded by distance to the <strong className="text-ink">nearest</strong> monitor. The
+              <strong className="text-ink"> deep-red</strong> land is{' '}
+              <strong className="text-ink">more than 150 miles</strong> from one — those are the gaps
+              your AQI is interpolated across.
+            </>
+          )
         ) : (
           <>Computing coverage…</>
         )}

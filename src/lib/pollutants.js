@@ -19,6 +19,7 @@ export const POLLUTANTS = [
     key: 'pm2_5',
     label: 'PM2.5',
     name: 'Fine particles',
+    form: 'particle', // drawn as orbs in the field
     unit: 'µg/m³',
     range: [0, 40],
     who: 5, // WHO annual guideline
@@ -34,6 +35,7 @@ export const POLLUTANTS = [
     key: 'pm10',
     label: 'PM10',
     name: 'Coarse particles',
+    form: 'particle',
     unit: 'µg/m³',
     range: [0, 60],
     who: 45, // WHO 24-hour
@@ -47,6 +49,7 @@ export const POLLUTANTS = [
     key: 'ozone',
     label: 'O₃',
     name: 'Ozone',
+    form: 'gas', // drawn as soft haze in the field
     unit: 'µg/m³',
     range: [20, 180],
     who: 100, // WHO 8-hour
@@ -59,6 +62,7 @@ export const POLLUTANTS = [
     key: 'nitrogen_dioxide',
     label: 'NO₂',
     name: 'Nitrogen dioxide',
+    form: 'gas',
     unit: 'µg/m³',
     range: [0, 60],
     who: 25, // WHO 24-hour
@@ -73,6 +77,7 @@ export const POLLUTANTS = [
     key: 'sulphur_dioxide',
     label: 'SO₂',
     name: 'Sulfur dioxide',
+    form: 'gas',
     unit: 'µg/m³',
     range: [0, 20],
     who: 40, // WHO 24-hour
@@ -85,6 +90,7 @@ export const POLLUTANTS = [
     key: 'carbon_monoxide',
     label: 'CO',
     name: 'Carbon monoxide',
+    form: 'gas',
     unit: 'µg/m³',
     range: [50, 600],
     who: 4000, // WHO 24-hour (4 mg/m³)
@@ -97,6 +103,7 @@ export const POLLUTANTS = [
     key: 'dust',
     label: 'Dust',
     name: 'Airborne dust',
+    form: 'particle',
     unit: 'µg/m³',
     range: [0, 25],
     who: 45, // no dust-specific guideline; borrow PM10 24-hour

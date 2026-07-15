@@ -1,14 +1,15 @@
-// Coverage-gap grid — a client-side choropleth of "how far is the nearest
-// monitor?" built entirely from the static monitor list (NO data pull). Each
-// land cell is colored by distance to its nearest regulatory PM2.5 monitor;
-// cells beyond the last band are omitted, so the map's holes ARE the gaps.
+// Coverage-gap layers — client-side choropleths of "how far is the nearest
+// monitor?" built entirely from the static monitor list (NO data pull).
 //
-// Computed lazily (only when the coverage layer is first shown) and memoized by
-// the caller. ~6k cells × ~1k monitors with a cheap equirectangular distance is
-// well under a frame's budget.
+//   • buildCoverageGrid()  — 0.5° land cells (continuous distance surface)
+//   • buildCountyCoverage()— US counties, same distance bands at the centroid
+//
+// Both reuse COVERAGE_BANDS / COVERAGE_GAP. Computed lazily (only when that
+// mode is first shown) and memoized by the caller.
 
 import monitors from '../data/pm25Monitors.json';
 import usStates from '../data/usStates.json';
+// usCounties.json (~1.3 MB) is loaded only when buildCountyCoverage() runs.
 
 // Distance bands in miles → fill color. Beyond the last band = uncovered (gap).
 export const COVERAGE_BANDS = [
@@ -78,6 +79,23 @@ export function pointInUS(lon, lat) {
 // [lat, lon] for every monitor (rows are [lat, lon, name, county, state]).
 const MON = monitors.map((m) => [m[0], m[1]]);
 
+function nearestMiles(lat, lon) {
+  const mpdLon = 69 * Math.cos((lat * Math.PI) / 180);
+  let best = Infinity;
+  for (const [mlat, mlon] of MON) {
+    const dLat = (lat - mlat) * 69;
+    const dLon = (lon - mlon) * mpdLon;
+    const d2 = dLat * dLat + dLon * dLon;
+    if (d2 < best) best = d2;
+  }
+  return Math.sqrt(best);
+}
+
+function colorForMiles(dist) {
+  const band = COVERAGE_BANDS.find((b) => dist <= b.max);
+  return band ? band.color : COVERAGE_GAP.color;
+}
+
 export function buildCoverageGrid(cell = 0.5) {
   const features = [];
   for (let lon = -125; lon < -66; lon += cell) {
@@ -87,22 +105,12 @@ export function buildCoverageGrid(cell = 0.5) {
       if (!onLand(cx, cy)) continue;
       // Nearest-monitor distance via equirectangular approximation (fast, plenty
       // accurate for banding at this scale).
-      const mpdLon = 69 * Math.cos((cy * Math.PI) / 180);
-      let best = Infinity;
-      for (const [mlat, mlon] of MON) {
-        const dLat = (cy - mlat) * 69;
-        const dLon = (cx - mlon) * mpdLon;
-        const d2 = dLat * dLat + dLon * dLon;
-        if (d2 < best) best = d2;
-      }
-      const dist = Math.sqrt(best);
-      const band = COVERAGE_BANDS.find((b) => dist <= b.max);
+      const dist = nearestMiles(cy, cx);
       // On-land cells always emit now — covered land takes its band colour, the
       // uncovered gap takes deep red. The holes become the point.
-      const color = band ? band.color : COVERAGE_GAP.color;
       features.push({
         type: 'Feature',
-        properties: { color },
+        properties: { color: colorForMiles(dist) },
         geometry: {
           type: 'Polygon',
           coordinates: [
@@ -117,6 +125,65 @@ export function buildCoverageGrid(cell = 0.5) {
         },
       });
     }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+// Average of an exterior ring's vertices — good enough as a county "center"
+// for distance banding (not a true geographic centroid, and we say so in the UI).
+function ringCenter(ring) {
+  let sx = 0;
+  let sy = 0;
+  // Skip the closing duplicate vertex if present.
+  const n = ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
+    ? ring.length - 1
+    : ring.length;
+  if (n <= 0) return null;
+  for (let i = 0; i < n; i++) {
+    sx += ring[i][0];
+    sy += ring[i][1];
+  }
+  return [sx / n, sy / n];
+}
+
+function featureCenter(geometry) {
+  if (geometry.type === 'Polygon') return ringCenter(geometry.coordinates[0]);
+  // MultiPolygon: use the largest exterior ring (by vertex count — cheap proxy).
+  let best = null;
+  let bestN = -1;
+  for (const poly of geometry.coordinates) {
+    const ring = poly[0];
+    if (ring.length > bestN) {
+      bestN = ring.length;
+      best = ring;
+    }
+  }
+  return best ? ringCenter(best) : null;
+}
+
+// County choropleth of the same distance story: each county is colored by how
+// far its approximate center sits from the nearest regulatory PM2.5 monitor.
+// Same bands as the grid. Hover properties carry name/state/miles for the popup.
+// Async so the ~1.3 MB county GeoJSON stays out of the map bundle until needed.
+export async function buildCountyCoverage() {
+  const { default: usCounties } = await import('../data/usCounties.json');
+  const features = [];
+  for (const f of usCounties.features) {
+    const center = featureCenter(f.geometry);
+    if (!center) continue;
+    const [lon, lat] = center;
+    const dist = nearestMiles(lat, lon);
+    const miles = Math.round(dist);
+    features.push({
+      type: 'Feature',
+      properties: {
+        color: colorForMiles(dist),
+        name: f.properties.name,
+        state: f.properties.state,
+        miles,
+      },
+      geometry: f.geometry,
+    });
   }
   return { type: 'FeatureCollection', features };
 }

@@ -11,11 +11,10 @@ import {
  * No global mode, no controller — P5Sketch.jsx owns mount/teardown and re-runs
  * this whenever `data` changes. `data = { current, view, mode, hidden }`:
  *   view: 'baseline' | 'source' | 'pollutants' | 'rings'
- *         baseline   = Earth's clean atmosphere
- *         source     = 3D field of MODELED PM2.5 origins ("what's causing…")
- *         pollutants = 3D field of MEASURED species, counts ∝ abundance
- *         rings      = concentric rings of the breath's source mix (same split
- *                      as the "What's in this breath" bar chart)
+ *         baseline   = Earth's clean breath (N₂/O₂/Ar rings)
+ *         source     = 3D field of MODELED PM2.5 origins
+ *         pollutants = measured species: gases as soft haze, PM as orbs
+ *         rings      = concentric rings of the breath's source mix
  *   mode: 'legal' | 'who' | 'current'        (which reference / scale)
  *   current: the Open-Meteo `current` readings (null in baseline view)
  *   sky: null | [top, mid, horizon] RGB triples (lib/sky.js) — when set, the
@@ -24,15 +23,12 @@ import {
  *
  * RENDERING (Style-2 charcoal): two deliberately different languages —
  *
- *   • The source / pollutant fields are a 3D VOLUME of luminous orbs. Specks
- *     live in a box of 3D positions; each frame we rotate the world (orbit),
- *     perspective-project to 2D ourselves, and blit a cached radial-glow sprite
- *     with additive compositing. Doing the projection in ~15 lines of JS and
- *     drawing with raw ctx.drawImage keeps it fast — no per-draw p5 overhead,
- *     no tint() (which re-renders the sprite through a temp canvas every call
- *     and was the old frame-rate killer), no WebGL pipeline to maintain.
- *     Interaction: drag to orbit, wheel to zoom (only over the canvas), pinch
- *     on touch; vertical swipes still scroll the page (touch-action: pan-y).
+ *   • The source / pollutant fields are a 3D VOLUME of luminous orbs (and, for
+ *     gases in the pollutant view, a few large soft haze puffs drawn behind
+ *     the PM orbs). Specks live in 3D; each frame we rotate, project, and blit
+ *     cached radial-glow sprites with additive compositing — raw
+ *     ctx.drawImage, no tint(), no WebGL. Interaction: drag to orbit,
+ *     wheel/pinch to zoom; vertical swipes still scroll (touch-action: pan-y).
  *
  *   • The baseline atmosphere and the breath rings are CRISP: plain
  *     white-outlined dots (the original diagram), which read far clearer for
@@ -92,19 +88,22 @@ function glowSprite(color) {
 // not a box. Wraps: leaving the wall re-enters at the opposite side (at the
 // antipode the same velocity points back inward), height wraps top↔bottom.
 class Speck3D {
-  constructor(color, radius, field) {
+  constructor(color, radius, field, { haze = false } = {}) {
     this.color = color;
     this.radius = radius;
     this.field = field;
+    this.haze = haze; // soft gas puff (few, large, dim) vs particle orb
     // sqrt() for uniform density over the disc footprint.
     const a = Math.random() * Math.PI * 2;
     const rr = Math.sqrt(Math.random()) * field.r;
     this.x = Math.cos(a) * rr;
     this.z = Math.sin(a) * rr;
     this.y = (Math.random() * 2 - 1) * field.ry;
-    this.vx = (Math.random() * 2 - 1) * 0.6;
-    this.vy = (Math.random() * 2 - 1) * 0.6;
-    this.vz = (Math.random() * 2 - 1) * 0.4;
+    // Haze drifts slower — a dissolved cloud, not a bouncing speck.
+    const speed = haze ? 0.25 : 0.6;
+    this.vx = (Math.random() * 2 - 1) * speed;
+    this.vy = (Math.random() * 2 - 1) * speed;
+    this.vz = (Math.random() * 2 - 1) * (haze ? 0.15 : 0.4);
   }
 
   move(agit) {
@@ -133,10 +132,11 @@ const SOURCE_BY_KEY = Object.fromEntries(
   [...SOURCES, ULTRAFINE].map((s) => [s.key, s])
 );
 
-// Earth's atmosphere by composition. Shown until a place is searched.
-// Labels feed the hover tooltip, same as the pollutant rings.
+// Earth's clean breath by composition. Shown until a place is searched — the
+// same "what's in a breath" ring language as the pollution source rings, but
+// for N₂/O₂/Ar instead of soot/haze. Labels feed the hover tooltip.
 const BASELINE_LAYERS = [
-  { value: 78, color: '#D45D9E', label: 'Nitrogen (N₂) · 78% of clean air' },
+  { value: 78, color: '#D45D9E', label: 'Nitrogen (N₂) · 78% of a clean breath' },
   { value: 21, color: '#5B6BE8', label: 'Oxygen (O₂) · 21%' },
   { value: 0.93, color: '#38C46A', centered: true, label: 'Argon (Ar) · 0.93%' },
   { value: 0.04, color: '#E86A6A', semiCentered: true, label: 'Carbon dioxide (CO₂) · 0.04%' },
@@ -173,8 +173,10 @@ export function airParticleSketch(p, data) {
     return p.constrain(p.map(c.us_aqi ?? 0, 0, 300, 0.11, 0.34), 0.11, 0.34);
   }
 
-  // A pulsing concentric ring of crisp particles — the original diagram's
-  // building block, used by the baseline and the pollutant-ring view.
+  // A pulsing concentric ring of crisp particles — shared by Earth's clean
+  // breath (baseline) and the pollution-source breath rings. Positions are
+  // fixed at spawn; the ring pulses, and a cheap sin-based wobble stands in
+  // for Brownian jitter (no Math.random per particle per frame).
   class Organic {
     constructor(
       radius,
@@ -193,79 +195,97 @@ export function airParticleSketch(p, data) {
       this.band = band;
       this.dot = dot;
       this.pulse = pulse;
-      this.label = label; // shown by the hover tooltip
+      this.label = label;
       this.particles = [];
+      // Jitter amplitude — a few px, scaled to band so dense rings stay crisp.
+      this.jitterAmp = Math.min(this.band * 0.2, 3.5);
     }
 
-    // Where this ring's particles actually sit (centered layers cluster at the
-    // middle; semiCentered at radius/5) — used by the hover hit-test.
     hitRadius() {
       if (this.centered) return 0;
       if (this.semiCentered) return this.radius / 5;
       return this.radius;
     }
 
-    ringDistance() {
-      if (this.centered) return p.random(0, this.radius / 10);
-      if (this.semiCentered) return this.radius / 5;
-      return this.radius + p.random(-this.band, this.band);
-    }
-
     generateParticles(numParticles) {
+      this.particles = [];
       for (let i = 0; i < numParticles; i++) {
         const angle = p.random(p.TWO_PI);
-        let distance;
-        if (this.centered) distance = p.random(0, this.radius / 3);
-        else if (this.semiCentered) distance = this.radius / 5;
-        else distance = this.radius + p.random(-this.band, this.band);
+        let baseDist;
+        if (this.centered) baseDist = p.random(0, this.baseRadius / 3);
+        else if (this.semiCentered) baseDist = this.baseRadius / 5;
+        else baseDist = this.baseRadius + p.random(-this.band, this.band);
+        // Phase offsets make each speck wobble independently without random().
         this.particles.push({
-          x: this.xpos + p.cos(angle) * distance,
-          y: this.ypos + p.sin(angle) * distance,
           angle,
-          distance,
+          baseDist,
+          phaseR: p.random(p.TWO_PI),
+          phaseA: p.random(p.TWO_PI),
         });
       }
     }
 
     show(changeVal) {
-      this.radius = this.baseRadius + p.sin(changeVal) * this.pulse;
-      // Crisp dots: a thin white outline makes each particle read distinctly
-      // against the charcoal ground (the original diagram's clarity).
+      const pulse = p.sin(changeVal) * this.pulse;
+      this.radius = this.baseRadius + pulse;
       p.stroke(255);
       p.strokeWeight(Math.max(0.5, this.dot / 9));
       p.fill(this.color);
-      const jitter = Math.min(this.band * 0.25, 5);
+      const cx = this.xpos;
+      const cy = this.ypos;
+      const dot = this.dot;
+      const jAmp = this.jitterAmp;
       for (const particle of this.particles) {
-        const distance = this.ringDistance();
-        particle.x = this.xpos + p.cos(particle.angle) * distance + p.random(-jitter, jitter);
-        particle.y = this.ypos + p.sin(particle.angle) * distance + p.random(-jitter, jitter);
-        p.ellipse(particle.x, particle.y, this.dot);
+        let distance;
+        if (this.centered) distance = particle.baseDist;
+        else if (this.semiCentered) distance = this.radius / 5;
+        else distance = particle.baseDist + pulse;
+        // Cheap organic jitter: two sins, no RNG.
+        const jR = Math.sin(changeVal * 1.7 + particle.phaseR) * jAmp;
+        const jA = Math.sin(changeVal * 2.1 + particle.phaseA) * 0.012;
+        const a = particle.angle + jA;
+        const d = distance + jR;
+        p.circle(cx + p.cos(a) * d, cy + p.sin(a) * d, dot);
       }
     }
   }
 
-  function addRing(step, startRadius, color, opts, numParticles) {
-    const r = startRadius + step;
-    const organic = new Organic(r, p.width / 2, p.height / 2, color, opts);
-    organic.generateParticles(numParticles);
-    organics.push(organic);
-    return r;
-  }
-
+  // Default / loading diagram: what's in a breath on Earth — clean air by
+  // volume. Same ring language as the pollution breath rings, but tighter —
+  // fewer dots need a smaller footprint so the field doesn't look sparse.
   function buildBaseline() {
     kind = 'baseline';
     organics = [];
     specks = [];
     change = 0;
-    pulseSpeed = BASE_PULSE_SPEED;
-    let r = 50;
-    for (const layer of BASELINE_LAYERS) {
-      // Home page only — keep the N₂/O₂ rings readable but light on the GPU.
-      // Cap well below the old 5000 so the idle landing page stays smooth.
-      const numParticles = Math.round(p.map(layer.value, 0, 100, 0, 1400));
-      const step = Math.max(24, p.sqrt(layer.value / p.PI) * 10);
-      r = addRing(step, r, layer.color, layer, numParticles);
-    }
+    pulseSpeed = BASE_PULSE_SPEED * 0.65;
+
+    const maxR = p.width * 0.32;
+    const inner = p.width * 0.04;
+    const rawSteps = BASELINE_LAYERS.map((l) => Math.max(0.05, Math.sqrt(l.value / Math.PI)));
+    const stepSum = rawSteps.reduce((a, b) => a + b, 0) || 1;
+    const scale = (maxR - inner) / stepSum;
+    const baseDot = Math.max(2.4, p.width / 85);
+    let r = inner;
+
+    BASELINE_LAYERS.forEach((layer, i) => {
+      const step = rawSteps[i] * scale;
+      const band = step * 0.28;
+      const pulse = p.constrain(step * 0.2, 2, step * 0.45);
+      const ringR = r + step;
+      const numParticles = Math.round(p.map(layer.value, 0, 100, 10, 200));
+      const organic = new Organic(ringR, p.width / 2, p.height / 2, layer.color, {
+        centered: !!layer.centered,
+        semiCentered: !!layer.semiCentered,
+        band,
+        dot: layer.centered || layer.semiCentered ? Math.max(2.2, baseDot * 0.9) : baseDot,
+        pulse,
+        label: layer.label,
+      });
+      organic.generateParticles(numParticles);
+      organics.push(organic);
+      r = ringR;
+    });
   }
 
   // Breath-ring view: one concentric ring per MODELED source in the pollution
@@ -320,34 +340,41 @@ export function airParticleSketch(p, data) {
       // Count already tracks the source share — keep a floor so tiny % still
       // reads as a thin ring, and a ceiling so one dominant source doesn't
       // fill the canvas solid.
-      const numParticles = Math.round(p.constrain(count * 0.85, 12, 420));
+      const numParticles = Math.round(p.constrain(count * 0.7, 10, 280));
       organic.generateParticles(numParticles);
       organics.push(organic);
     });
   }
 
   // Shared setup for both 3D field views: reset state, size the volume, then
-  // fill it from a list of { color, size, count } groups. Every orb is one
-  // drawImage per frame, so the field is capped and subsampled proportionally
-  // when a heavy scenario (cigarette, wildfire) would blow past it — a dense
-  // field still reads dense, and the frame stays smooth.
+  // fill it from a list of { color, size, count, haze? } groups. Every orb is
+  // one drawImage per frame, so the field is capped and subsampled
+  // proportionally when a heavy scenario would blow past it. Haze groups stay
+  // few-by-design (soft gas puffs) and are NOT subsampled down with particles.
   function fill3DField(c, groups) {
     kind = 'source';
     organics = [];
     specks = [];
     agitation = clamp(p.map(c.us_aqi ?? 0, 0, 300, 0.5, 2.5), 0.5, 2.5);
-    // Larger cylinder so zoom-out has more "air" to reveal around the cloud.
     field = { r: p.width * 0.92, ry: p.width * 0.7 };
 
     const MAX_SPECKS = typeof window !== 'undefined' && window.innerWidth < 700 ? 750 : 1300;
-    const wanted = groups.reduce((sum, v) => sum + v.count, 0);
-    const keep = wanted > MAX_SPECKS ? MAX_SPECKS / wanted : 1;
+    const particleWanted = groups
+      .filter((v) => !v.haze)
+      .reduce((sum, v) => sum + v.count, 0);
+    const keep = particleWanted > MAX_SPECKS ? MAX_SPECKS / particleWanted : 1;
 
-    for (const v of groups) {
-      const count = Math.round(v.count * keep);
+    // Haze first in the array so draw order can put them behind particle orbs
+    // without a second pass sort every frame.
+    const ordered = [
+      ...groups.filter((v) => v.haze),
+      ...groups.filter((v) => !v.haze),
+    ];
+    for (const v of ordered) {
+      const count = v.haze ? v.count : Math.round(v.count * keep);
       for (let i = 0; i < count; i++) {
         const radius = v.size[0] + Math.random() * (v.size[1] - v.size[0]);
-        specks.push(new Speck3D(v.color, radius, field));
+        specks.push(new Speck3D(v.color, radius, field, { haze: !!v.haze }));
       }
     }
   }
@@ -368,20 +395,26 @@ export function airParticleSketch(p, data) {
     fill3DField(c, groups);
   }
 
-  // Pollutant-field view: measured species with counts ∝ real relative
-  // abundance (molecules for gases via µg/m³÷MW; estimated particle numbers
-  // for PM/dust). Gases and particles each get their own canvas budget so
-  // ozone can correctly outnumber NO₂ without erasing the particle swarm —
-  // absolute gas≫particle scale is disclosed in the readout. Orbs sized by
-  // relative aerodynamic diameter; gases stay small (molecules). Zero stays zero.
+  // Pollutant field: gases as soft haze puffs, PM/dust as particle orbs.
+  // Colors match POLLUTANTS / the readout list. Perf: ≤ ~40 haze blits/frame.
   function buildPollutants(c) {
-    const groups = pollutantAbundance(c)
-      .map((a) => {
-        const def = POLLUTANT_BY_KEY[a.key];
-        if (!def) return null;
-        return { color: def.color, size: a.size, count: a.count };
-      })
-      .filter(Boolean);
+    const HAZE_PUFFS = typeof window !== 'undefined' && window.innerWidth < 700 ? 28 : 40;
+    const abundance = pollutantAbundance(c);
+    const groups = [];
+    for (const a of abundance) {
+      const def = POLLUTANT_BY_KEY[a.key];
+      if (!def) continue;
+      if (a.kind === 'gas' || def.form === 'gas') {
+        groups.push({
+          color: def.color,
+          size: [14, 28],
+          count: Math.max(a.share > 0.02 ? 2 : 0, Math.round(a.share * HAZE_PUFFS)),
+          haze: true,
+        });
+      } else {
+        groups.push({ color: def.color, size: a.size, count: a.count });
+      }
+    }
     fill3DField(c, groups);
   }
 
@@ -428,26 +461,33 @@ export function airParticleSketch(p, data) {
     const halfH = p.height / 2;
 
     ctx.globalCompositeOperation = 'lighter'; // additive: overlaps sum to light
-    for (const s of specks) {
-      s.move(agitation);
-      // Yaw about Y, then pitch about X.
-      const x1 = s.x * cy + s.z * sy;
-      const z1 = -s.x * sy + s.z * cy;
-      const y1 = s.y * cx - z1 * sx;
-      const z2 = (s.y * sx + z1 * cx) * cam.zoom;
+    // Two passes keep haze behind particle orbs without sorting every speck.
+    for (const passHaze of [true, false]) {
+      for (const s of specks) {
+        if (s.haze !== passHaze) continue;
+        s.move(agitation);
+        // Yaw about Y, then pitch about X.
+        const x1 = s.x * cy + s.z * sy;
+        const z1 = -s.x * sy + s.z * cy;
+        const y1 = s.y * cx - z1 * sx;
+        const z2 = (s.y * sx + z1 * cx) * cam.zoom;
 
-      const denom = f - z2;
-      if (denom < nearLimit) continue; // passed behind the eye
-      const scale = f / denom;
-      const px = halfW + x1 * cam.zoom * scale;
-      const py = halfH + y1 * cam.zoom * scale;
-      // Smaller orbs + more empty dark: pollution is a tiny fraction of a breath.
-      const d = s.radius * 3.1 * scale;
-      if (px + d < 0 || px - d > p.width || py + d < 0 || py - d > p.height) continue;
+        const denom = f - z2;
+        if (denom < nearLimit) continue; // passed behind the eye
+        const scale = f / denom;
+        const px = halfW + x1 * cam.zoom * scale;
+        const py = halfH + y1 * cam.zoom * scale;
+        // Haze: large soft cloud; particles: small dense orb.
+        const d = (s.haze ? s.radius * 5.5 : s.radius * 3.1) * scale;
+        if (px + d < 0 || px - d > p.width || py + d < 0 || py - d > p.height) continue;
 
-      // Nearer = brighter; fade out approaching the near cull so orbs never pop.
-      ctx.globalAlpha = Math.min(1, 0.55 * scale) * clamp((denom - nearLimit) / (f * 0.1), 0, 1);
-      ctx.drawImage(glowSprite(s.color), px - d / 2, py - d / 2, d, d);
+        const fade = clamp((denom - nearLimit) / (f * 0.1), 0, 1);
+        // Nearer = brighter; haze stays dim so it reads as dissolved air.
+        ctx.globalAlpha = s.haze
+          ? Math.min(0.18, 0.1 * scale) * fade
+          : Math.min(1, 0.55 * scale) * fade;
+        ctx.drawImage(glowSprite(s.color), px - d / 2, py - d / 2, d, d);
+      }
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -510,8 +550,10 @@ export function airParticleSketch(p, data) {
   }
 
   function build() {
-    if (is3D) (view === 'pollutants' ? buildPollutants : buildSource)(current);
-    else if (view === 'rings' && current) buildRings(current);
+    if (is3D) {
+      if (view === 'pollutants') buildPollutants(current);
+      else buildSource(current);
+    } else if (view === 'rings' && current) buildRings(current);
     else buildBaseline();
   }
 
@@ -569,7 +611,8 @@ export function airParticleSketch(p, data) {
     // crisp ring views only pulse gently, so 30fps; the 3D field runs at 60
     // for smooth orbiting — its frame is cheap (raw drawImage blits).
     p.pixelDensity(1);
-    p.frameRate(is3D ? 60 : 30);
+    // Rings only pulse — 24fps is plenty. 3D needs 60 for orbit smoothness.
+    p.frameRate(is3D ? 60 : 24);
     ground = groundColor();
     const size = hostWidth();
     p.resizeCanvas(size, size);
@@ -603,14 +646,8 @@ export function airParticleSketch(p, data) {
     if (size !== p.width) {
       p.resizeCanvas(size, size);
       skyGradientCache = null; // gradient is sized to the canvas
-      if (is3D) {
-        build(); // re-size the volume to the new canvas
-      } else {
-        for (const organic of organics) {
-          organic.xpos = p.width / 2;
-          organic.ypos = p.height / 2;
-        }
-      }
+      // Rings/baseline are canvas-relative — rebuild so radii stay inside.
+      build();
     }
   };
 

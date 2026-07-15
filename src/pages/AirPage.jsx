@@ -22,7 +22,6 @@ const SOURCE_BASE = 'https://open-meteo.com/en/docs/air-quality-api';
 
 // Provider landing pages the per-section source links point at.
 const AIRNOW_URL = 'https://www.airnow.gov/';
-const AIRNOW_AQI_URL = 'https://www.airnow.gov/aqi/aqi-basics/';
 const EPA_PM_URL = 'https://www.epa.gov/pm-pollution/particulate-matter-pm-basics';
 
 // The source link points at the API docs. Once we know the place, we deep-link
@@ -175,7 +174,11 @@ export default function AirPage() {
 
       <div className="mt-6">
         <GourmetMediaContainer
-          title={hasResult ? `What’s in the air in ${state.data.location.name}?` : 'What’s in the air?'}
+          title={
+            hasResult
+              ? `What’s in the air in ${state.data.location.name}?`
+              : 'What’s in a breath — on Earth'
+          }
           titleAction={
             // A quick jump to a random US place — shares the title's baseline row.
             <button
@@ -371,19 +374,17 @@ function RingPanel({ label, data }) {
 }
 
 /* ── Controls: the "View" toggle. Three cuts of the same air:
-     • What's causing the pollution — 3D field of modeled PM2.5 origins.
-     • What pollutants are there — 3D field of measured species; counts track
-       relative abundance (molecules for gases, estimated numbers for PM).
-     • What's in a breath of air? — concentric rings of the same source mix as
-       the "What's in this breath" bar chart.
-   The 3D fields sit together; breath rings last. ──────────────────────────── */
+     • Where did the particles come from? — modeled PM2.5 origins.
+     • What pollutants are there — gases as haze, PM as orbs (matched colors).
+     • What's in a breath of air? — concentric rings of the PM2.5 source mix.
+   ─────────────────────────────────────────────────────────────────────────── */
 function Controls({ view, onView }) {
   return (
     <Segmented
       value={view}
       onChange={onView}
       options={[
-        { value: 'source', label: "What's causing the pollution" },
+        { value: 'source', label: 'Where did the particles come from?' },
         { value: 'pollutants', label: 'What pollutants are there' },
         { value: 'rings', label: "What's in a breath of air?" },
       ]}
@@ -754,7 +755,7 @@ function SectionSource({ source }) {
    the compressed EPA/AirNow activity guidance (aqiGuidance in pollutants.js),
    keyed to the same category breakpoints as the gauge, led by a colored dot so
    it reads at the category's severity. ───────────────────────────────────── */
-function WhatToDoSection({ aqi, category, source }) {
+function WhatToDoSection({ aqi, category }) {
   const advice = aqiGuidance(aqi);
   if (!advice) return null;
   return (
@@ -768,7 +769,6 @@ function WhatToDoSection({ aqi, category, source }) {
           <strong style={{ color: category.color }}>{category.name}.</strong> {advice}
         </p>
       </div>
-      <SectionSource source={source} />
     </Section>
   );
 }
@@ -886,11 +886,13 @@ function MeasuredPills({ measured, focus, onPick }) {
    (AirNow only reports PM2.5 / O₃ / PM10). ─────────────────────────────────── */
 function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast, source }) {
   let modelAqi = modeled?.aqi ?? null;
-  let modelNote = modeled?.driver ? `driver: ${modeled.driver}` : null;
   let measuredAqi = measured?.aqi ?? null;
-  let measuredNote = measured
-    ? `${measured.reportingArea}${measured.distanceMi != null ? ` · ${measured.distanceMi} mi` : ''}`
-    : 'No nearby AirNow reading';
+  // Default labels fold the old under-bar notes into the title row.
+  let modelLabel = modeled?.driver ? `CAMS model (${modeled.driver})` : 'CAMS model';
+  let measuredLabel = measured
+    ? `Monitor (${measured.reportingArea}${measured.distanceMi != null ? ` · ${measured.distanceMi} mi` : ''})`
+    : 'Monitor';
+  let measuredEmpty = 'No nearby AirNow reading';
 
   if (focus) {
     const keys = FOCUS_KEYS[focus.label];
@@ -898,16 +900,20 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
     if (focus.label === 'PM2.5' && nowcast?.aqi != null) {
       modelAqi = Math.max(modelAqi ?? 0, nowcast.aqi);
     }
-    modelNote = null;
+    modelLabel = `CAMS model (${focus.label})`;
     measuredAqi = keys.airnow ? (measured?.parameters?.[keys.airnow]?.aqi ?? null) : null;
     if (measuredAqi == null) {
-      measuredNote = measured
+      measuredLabel = `Monitor (${focus.label})`;
+      measuredEmpty = measured
         ? `AirNow doesn’t report ${focus.label} here`
         : 'No nearby AirNow reading';
+    } else if (measured) {
+      measuredLabel = `Monitor (${focus.label} · ${measured.reportingArea}${measured.distanceMi != null ? ` · ${measured.distanceMi} mi` : ''})`;
+    } else {
+      measuredLabel = `Monitor (${focus.label})`;
     }
   }
   if (modelAqi == null && measuredAqi == null && !focus) return null;
-  const suffix = focus ? ` · ${focus.label}` : '';
   // Zoom the axis to 300 unless a reading actually reaches into the top bands —
   // most days both bars live under 150, and a fixed 0–500 scale squashed them
   // into indistinguishable stubs. Only stretch to 500 when something needs it.
@@ -916,13 +922,12 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
   return (
     <Section title="What’s been measured?">
       <div className="grid gap-3">
-        <CompareBar label={`CAMS model${suffix}`} value={modelAqi} top={top} note={modelNote} />
+        <CompareBar label={modelLabel} value={modelAqi} top={top} />
         <CompareBar
-          label={`Monitor${suffix}`}
+          label={measuredLabel}
           value={measuredAqi}
           top={top}
-          emptyLabel="Unavailable"
-          note={measuredNote}
+          emptyLabel={measuredEmpty}
         />
       </div>
       <p className="mt-2 text-[10px] leading-snug text-ink-muted">
@@ -1042,13 +1047,12 @@ function Readout({ result, view, hidden, onToggle, source }) {
   const historySource = isScenario
     ? illustrative
     : { text: 'Open-Meteo (CAMS) used for the PM2.5 history', href: camsUrl };
-  const guidanceSource = { text: 'AirNow / US EPA activity guidance', href: AIRNOW_AQI_URL };
 
   return (
-    // Desktop: capped + scrollable so a long list never runs past the diagram
-    // beside it (fixed px, not vh — see the preview quirk in CLAUDE.md).
-    // Mobile: the column stacks under the diagram, so it runs full length.
-    <div className="rounded-lg border border-grid-strong bg-cream/60 p-5 sm:max-h-[560px] sm:overflow-y-auto">
+    // Desktop: bordered card, capped + scrollable so a long list never runs past
+    // the diagram (fixed px, not vh — see the preview quirk in CLAUDE.md).
+    // Mobile: no extra border/bg — GourmetMediaContainer already frames the column.
+    <div className="sm:max-h-[560px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-display text-2xl italic">{location.name}</h3>
         {/* Provenance settled BEFORE the number is read. */}
@@ -1096,12 +1100,12 @@ function Readout({ result, view, hidden, onToggle, source }) {
       {/* What the headline AQI means for the reader's day — a peer section of
          "Source" / "What's been measured". Keyed to the OVERALL reading, not a
          focused pollutant, since the advice is about the air as a whole. */}
-      <WhatToDoSection aqi={displayAqi} category={aqiCategory(displayAqi)} source={guidanceSource} />
+      <WhatToDoSection aqi={displayAqi} category={aqiCategory(displayAqi)} />
 
 
       <div className="mt-4 border-t border-grid-strong pt-4">
         {view === 'pollutants' ? (
-          <PollutantList current={current} gasNote source={readingsSource} />
+          <PollutantList current={current} source={readingsSource} />
         ) : (
           <SourceLegend
             current={current}
@@ -1338,29 +1342,30 @@ function BreathBars({ sources }) {
         <div style={{ width: `${SLIVER_PCT}%`, background: 'rgb(var(--accent))' }} />
       </div>
 
-      {/* Dashed connectors: the sliver's edges fan out to bar 2's full width */}
-      <svg viewBox="0 0 100 10" preserveAspectRatio="none" className="block h-3 w-full">
+      {/* Dashed connectors: the sliver's edges fan out to bar 2's full width.
+          Tall enough that the dashes read as lines, not a hairline smudge. */}
+      <svg viewBox="0 0 100 22" preserveAspectRatio="none" className="block h-6 w-full sm:h-7">
         <line
           x1={100 - SLIVER_PCT}
           y1="0"
           x2="0"
-          y2="10"
+          y2="22"
           stroke="rgb(var(--sand-muted))"
-          strokeWidth="1"
+          strokeWidth="1.25"
           strokeDasharray="3 3"
           vectorEffect="non-scaling-stroke"
-          opacity="0.75"
+          opacity="0.85"
         />
         <line
           x1="100"
           y1="0"
           x2="100"
-          y2="10"
+          y2="22"
           stroke="rgb(var(--sand-muted))"
-          strokeWidth="1"
+          strokeWidth="1.25"
           strokeDasharray="3 3"
           vectorEffect="non-scaling-stroke"
-          opacity="0.75"
+          opacity="0.85"
         />
       </svg>
 
@@ -1412,56 +1417,50 @@ function LegendRow({ entry, off, onToggle, rose, children }) {
   );
 }
 
-function PollutantList({ current, gasNote = false, source }) {
+function PollutantList({ current, source }) {
   return (
     <div>
       <h4 className="mb-1 font-subtitle text-base">Each reading vs both lines</h4>
       <p className="mb-2 rounded-md bg-cream/60 px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
-        These are the six pollutants regulators <strong>measure directly</strong> — each a real
-        concentration (SO₂ here is the <em>gas</em>). Contrast with{' '}
-        <strong>What&apos;s causing the pollution</strong>, which <em>models</em> what the PM2.5
-        particle mass is made of.
+        Each row’s color matches the field. <strong>Gases</strong> (O₃, NO₂, SO₂, CO) draw as soft
+        haze; <strong>particles</strong> (PM2.5, PM10, dust) draw as orbs sized by diameter. Counts
+        track relative abundance — not the legal line. Contrast with{' '}
+        <strong>Where did the particles come from?</strong>, which models what the PM2.5 mass is made
+        of.
       </p>
-      {gasNote && (
-        <p className="mb-2 rounded-md border border-dashed border-grid-strong px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
-          In the field, speck <strong>count</strong> tracks relative abundance from the measured
-          µg/m³ — gases as molecules (∝ concentration ÷ molecular weight, so ozone usually
-          outnumbers NO₂), particles as an estimated number from mass and size (fine PM makes
-          many more particles per µg than coarse dust). Gases and particles each get their own
-          canvas budget: a cubic meter holds vastly more gas molecules than PM particles, so they
-          aren&apos;t drawn on one absolute scale. Orb <strong>size</strong> is relative diameter —
-          PM2.5 smallest, PM10 larger, dust coarsest; gas orbs stay small (molecules).
-        </p>
-      )}
       <ul className="grid gap-3">
         {POLLUTANTS.map((def) => {
           const value = current[def.key];
           if (value == null) return null;
-          // Same hex the ring diagram draws with — the dot, bars and ring all
-          // cross-reference by colour.
           const hex = def.color;
-          // One shared scale INSIDE this card (reading + both lines), so the
-          // three bars compare honestly — but scales are not comparable across
-          // pollutants (CO lives in the thousands, SO₂ in the tens).
           const top = Math.max(value, def.who, def.legal) * 1.05;
-          // Over-the-line highlight: ONE consistent reddish wash whenever the
-          // reading passes either reference line (border + background together).
           const overLine = value > def.who || value > def.legal;
           const cardTint = overLine
             ? 'border-[#D6392F]/50 bg-[#D6392F]/[0.10]'
             : 'border-grid-strong bg-cream/40';
+          const isGas = def.form === 'gas';
           return (
             <li key={def.key} className={`rounded-lg border p-3 text-sm ${cardTint}`}>
               <div className="flex items-baseline justify-between gap-2">
                 <Tip text={def.blurb}>
                   <span className="flex min-w-0 cursor-help items-center gap-1.5">
                     <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      className={`h-2.5 shrink-0 ${isGas ? 'w-3.5 rounded-sm opacity-80' : 'w-2.5 rounded-full'}`}
                       style={{ background: hex }}
+                      title={isGas ? 'Drawn as haze' : 'Drawn as particle orb'}
                     />
                     <span className="truncate">
                       <strong>{def.label}</strong>{' '}
                       <span className="text-xs text-ink-muted">{def.name}</span>
+                    </span>
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                        isGas
+                          ? 'bg-data-primary/15 text-data-primary'
+                          : 'bg-ink/10 text-ink-muted'
+                      }`}
+                    >
+                      {isGas ? 'gas · haze' : 'particle'}
                     </span>
                   </span>
                 </Tip>
@@ -1516,12 +1515,12 @@ function ScaleBar({ label, value, top, color }) {
 
 function BaselineNote() {
   return (
-    <div className="rounded-lg border border-grid-strong bg-cream/60 p-5">
-      <h3 className="font-display text-2xl italic">Baseline: Earth’s atmosphere</h3>
+    <div className="sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
+      <h3 className="font-display text-2xl italic">What’s in a breath — on Earth</h3>
       <p className="mt-2 leading-relaxed text-ink-muted">
-        Right now you’re looking at clean air by composition — nitrogen, oxygen, argon, CO₂, neon,
-        and trace gases. Search a place above and the diagram redraws using its current pollutant
-        levels instead.
+        Clean air by volume: ~78% nitrogen, ~21% oxygen, ~1% argon, plus CO₂, neon, and other trace
+        gases. Pollution is the tiny leftover. Search a place above and the rings redraw for that
+        air instead.
       </p>
     </div>
   );

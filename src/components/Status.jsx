@@ -1,9 +1,13 @@
 // Shared loading / error states for lookup pages. A failed lookup must render
 // a plain, styled message — never a blank screen (especially when embedded in
-// someone else's page).
-
+// someone else's page). The canvas keeps showing Earth's clean breath rings
+// while this label sits above — so loading doesn't swap to a different visual.
 export function Loading({ label = 'Looking that up…' }) {
-  return <p className="animate-pulse py-6 text-ink-muted">{label}</p>;
+  return (
+    <p className="py-3 text-center text-sm text-ink-muted" role="status" aria-live="polite">
+      {label}
+    </p>
+  );
 }
 
 export function ErrorState({ message }) {
