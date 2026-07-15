@@ -197,8 +197,12 @@ export function airParticleSketch(p, data) {
       this.pulse = pulse;
       this.label = label;
       this.particles = [];
-      // Jitter amplitude — radial wobble scaled to the ring band.
-      this.jitterAmp = Math.min(this.band * 0.4, 7);
+      // Jitter amplitude — outer rings use the band; centered/semiCentered
+      // layers barely pulse, so they get a floor so the middle still wobbles.
+      this.jitterAmp =
+        this.centered || this.semiCentered
+          ? Math.max(5.5, Math.min(this.band * 0.55, 9))
+          : Math.min(this.band * 0.4, 7);
     }
 
     hitRadius() {
@@ -235,6 +239,8 @@ export function airParticleSketch(p, data) {
       const cy = this.ypos;
       const dot = this.dot;
       const jAmp = this.jitterAmp;
+      // Center clusters get a stronger angular wander (they don't ride the pulse).
+      const jAScale = this.centered || this.semiCentered ? 0.055 : 0.028;
       for (const particle of this.particles) {
         let distance;
         if (this.centered) distance = particle.baseDist;
@@ -242,7 +248,7 @@ export function airParticleSketch(p, data) {
         else distance = particle.baseDist + pulse;
         // Cheap organic jitter: two sins, no RNG — amp tuned for visible wobble.
         const jR = Math.sin(changeVal * 1.7 + particle.phaseR) * jAmp;
-        const jA = Math.sin(changeVal * 2.1 + particle.phaseA) * 0.028;
+        const jA = Math.sin(changeVal * 2.1 + particle.phaseA) * jAScale;
         const a = particle.angle + jA;
         const d = distance + jR;
         p.circle(cx + p.cos(a) * d, cy + p.sin(a) * d, dot);
@@ -273,7 +279,10 @@ export function airParticleSketch(p, data) {
       const band = step * 0.28;
       const pulse = p.constrain(step * 0.2, 2, step * 0.45);
       const ringR = r + step;
-      const numParticles = Math.round(p.map(layer.value, 0, 100, 10, 200));
+      // Denser field than the old 10–200 map — outer N₂/O₂ rings especially,
+      // with a floor so the tiny center gases still read as a swarm.
+      let numParticles = Math.round(p.map(layer.value, 0, 100, 36, 360));
+      if (layer.centered || layer.semiCentered) numParticles = Math.max(40, numParticles);
       const organic = new Organic(ringR, p.width / 2, p.height / 2, layer.color, {
         centered: !!layer.centered,
         semiCentered: !!layer.semiCentered,
@@ -340,7 +349,7 @@ export function airParticleSketch(p, data) {
       // Count already tracks the source share — keep a floor so tiny % still
       // reads as a thin ring, and a ceiling so one dominant source doesn't
       // fill the canvas solid.
-      const numParticles = Math.round(p.constrain(count * 0.7, 10, 280));
+      const numParticles = Math.round(p.constrain(count * 1.05, 18, 360));
       organic.generateParticles(numParticles);
       organics.push(organic);
     });
