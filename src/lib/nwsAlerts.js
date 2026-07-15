@@ -36,7 +36,10 @@ export async function fetchAirAlerts(latitude, longitude) {
       until: a.ends ?? a.expires ?? null,
       sender: a.senderName ?? null,
       more: air.length - 1,
-      url: 'https://alerts.weather.gov/',
+      // The public alerts page. (The old alerts.weather.gov host was retired by
+      // NWS and no longer resolves; this is its replacement. There's no stable
+      // human-facing page per individual alert, so this lists active ones.)
+      url: 'https://www.weather.gov/alerts',
     };
   } catch {
     return null;

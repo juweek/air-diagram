@@ -45,7 +45,7 @@ const map = (v, a, b, c, d) => c + ((v - a) / (b - a)) * (d - c);
 // only scales the source view — the pollutant rings are untouched.
 export function densityScale() {
   if (typeof window === 'undefined') return 1;
-  return window.innerWidth < 700 ? 1.5 : 2.4;
+  return window.innerWidth < 700 ? 1.2 : 1.9;
 }
 
 // Turn a set of current readings into source fractions (summing to 1) plus an
@@ -103,7 +103,7 @@ export function particleBreakdown(current, mode = 'legal') {
   const scale = densityScale();
   // Sparse on purpose: a breath is ~99.99% N₂/O₂/Ar. The swarm is an intensity
   // diagram, not a particle census — keep the field mostly empty dark.
-  const total = Math.round(map(ratio, 0, 6, 28, 700) * scale);
+  const total = Math.round(map(ratio, 0, 6, 22, 560) * scale);
 
   const sources = {};
   for (const s of SOURCES) {
@@ -111,7 +111,124 @@ export function particleBreakdown(current, mode = 'legal') {
   }
   // Ultrafine dominates the heavy-combustion scenarios (cigarette, joint); a
   // lower multiplier keeps those fields from overwhelming the canvas.
-  const ultrafine = Math.round(comp.ultrafineIndex * 110 * scale);
+  const ultrafine = Math.round(comp.ultrafineIndex * 85 * scale);
 
   return { sources, ultrafine, total, fractions: comp.fractions, line, ratio };
 }
+
+// ── Pollutant abundance (for the "What pollutants are there" field) ─────────
+//
+// Counts here are RELATIVE abundances derived from the measured µg/m³ — not
+// exceedance over a legal line. Two families, each honest within itself:
+//
+//   • Gases (O₃, NO₂, SO₂, CO): molecule count ∝ (µg/m³) / molecular weight.
+//     So ozone typically outnumbers NO₂ when its mass concentration is higher
+//     (nearly identical MWs), and CO can dominate because outdoor CO is often
+//     hundreds of µg/m³ with a light molecule.
+//   • Particles (PM2.5, PM10, dust): estimated number concentration from mass,
+//     assuming spherical particles at a characteristic diameter. Fine PM makes
+//     far more particles per µg than coarse dust.
+//
+// Gases and particles are NOT on the same absolute scale (a cubic meter holds
+// ~10¹⁰× more gas molecules than PM particles). Each family gets its own canvas
+// budget so both stay visible; the UI caption says so. Zero stays zero.
+
+const AVOGADRO = 6.02214076e23;
+const PARTICLE_DENSITY_G_CM3 = 1.5; // typical urban aerosol bulk density
+
+// g/mol — Open-Meteo reports these gases as µg/m³.
+const GAS_MW = {
+  ozone: 48,
+  nitrogen_dioxide: 46,
+  sulphur_dioxide: 64,
+  carbon_monoxide: 28,
+};
+
+// Characteristic aerodynamic diameter (µm) for a rough number-from-mass
+// estimate. Not a size distribution — just enough to put fine ≫ coarse.
+const PARTICLE_DIAM_UM = {
+  pm2_5: 0.5,
+  pm10: 5,
+  dust: 8,
+};
+
+export const POLLUTANT_SPECK_SIZE = {
+  pm2_5: [1, 2.5],
+  pm10: [2.5, 5.5],
+  dust: [4, 7.5],
+};
+export const GAS_SPECK_SIZE = [1, 1.8];
+
+// Molecules per m³ from a µg/m³ gas reading.
+function gasNumberDensity(ugPerM3, mw) {
+  return ((ugPerM3 * 1e-6) / mw) * AVOGADRO;
+}
+
+// Particles per m³ from a µg/m³ mass reading + characteristic diameter.
+function particleNumberDensity(ugPerM3, diamUm) {
+  const rCm = (diamUm * 1e-4) / 2;
+  const massPerParticleG = (4 / 3) * Math.PI * rCm ** 3 * PARTICLE_DENSITY_G_CM3;
+  if (massPerParticleG <= 0) return 0;
+  return (ugPerM3 * 1e-6) / massPerParticleG;
+}
+
+/**
+ * Relative draw counts for the pollutant field. Returns
+ * `{ key, color, size, count, kind, share }[]` where `share` is the fraction
+ * within that kind (gas or particle), summing to ~1 per kind.
+ */
+export function pollutantAbundance(current) {
+  const scale = densityScale();
+  // Canvas budgets — gases usually dominate outdoor molecule counts, so they
+  // get the larger share of dots; particles stay readable as a separate family.
+  const gasBudget = Math.round(380 * scale);
+  const particleBudget = Math.round(180 * scale);
+
+  const gases = [];
+  const particles = [];
+
+  // Iterate known keys so this module doesn't hard-depend on POLLUTANTS order;
+  // colors are filled by the sketch from POLLUTANTS.
+  for (const key of Object.keys(GAS_MW)) {
+    const ug = current[key];
+    if (ug == null || ug <= 0) continue;
+    gases.push({ key, raw: gasNumberDensity(ug, GAS_MW[key]) });
+  }
+  for (const key of Object.keys(PARTICLE_DIAM_UM)) {
+    const ug = current[key];
+    if (ug == null || ug <= 0) continue;
+    particles.push({ key, raw: particleNumberDensity(ug, PARTICLE_DIAM_UM[key]) });
+  }
+
+  const gasTotal = gases.reduce((a, g) => a + Math.sqrt(g.raw), 0) || 1;
+  const particleTotal = particles.reduce((a, g) => a + Math.sqrt(g.raw), 0) || 1;
+
+  // sqrt softens the within-family dynamic range so a minority species (e.g.
+  // coarse PM next to fine PM, or NO₂ next to CO) still draws a few dots,
+  // while the majority still clearly dominates. Ratios stay directionally true.
+  return [
+    ...gases.map((g) => {
+      const soft = Math.sqrt(g.raw);
+      return {
+        key: g.key,
+        kind: 'gas',
+        raw: g.raw,
+        share: soft / gasTotal,
+        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / gasTotal) * gasBudget)),
+        size: GAS_SPECK_SIZE,
+      };
+    }),
+    ...particles.map((g) => {
+      const soft = Math.sqrt(g.raw);
+      return {
+        key: g.key,
+        kind: 'particle',
+        raw: g.raw,
+        share: soft / particleTotal,
+        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / particleTotal) * particleBudget)),
+        size: POLLUTANT_SPECK_SIZE[g.key] ?? GAS_SPECK_SIZE,
+      };
+    }),
+  ];
+}
+

@@ -107,10 +107,23 @@
   .hero-bars {
     animation: hero-bar-breathe 5.5s ease-in-out infinite;
   }
+
+  /* Each bar eases toward the new scaleY that HeroBars deals it every few
+     seconds. Transform-only (no layout/paint beyond the bar), anchored to its
+     own baseline via fill-box so bars grow/shrink from the ground up. */
+  .hero-bars rect {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    transition: transform 2.4s cubic-bezier(0.33, 0, 0.2, 1);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .hero-bars {
       animation: none;
       opacity: 0.32;
+    }
+    .hero-bars rect {
+      transition: none;
     }
   }
 }
@@ -134,14 +147,28 @@
   margin: 20px 0;
 }
 
-.gourmetMediaContainer > h2 {
+/* Title row: the big question and its right-flush action (Random) share one
+   baseline; on a narrow card the action wraps under and sits left. */
+.gourmetMediaContainer .containerTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0 0 4px;
+}
+.gourmetMediaContainer .containerTitleRow > h2 {
+  flex: 1 1 auto;
+}
+
+.gourmetMediaContainer > .containerTitleRow > h2 {
   font-family: 'Fraunces', Georgia, serif;
   font-size: 2rem;
   line-height: 1.15;
   font-weight: 500;
   font-style: italic;
   color: rgb(var(--sand-bright));
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .gourmetMediaContainer .containerIntro {
@@ -246,15 +273,30 @@
   max-width: 100%;
 }
 
-/* Mobile: card sheds its frame for full-bleed embeds; the graph band keeps its
-   hairline so the field still reads as a contained "window". */
+/* Mobile: the card goes truly FULL-BLEED — no box-inside-a-box. The negative
+   margins pull it out of the page's centered padding to the viewport edges
+   (the classic 50% − 50vw breakout; works because <main> is centered), and the
+   side borders go with it. The graph band keeps its hairline so the field
+   still reads as a contained "window". */
 @media (max-width: 768px) {
   .gourmetMediaContainer {
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
     border: 0;
     border-top: 1px solid rgb(var(--hairline-strong));
     border-bottom: 1px solid rgb(var(--hairline-strong));
     border-radius: 0;
     padding: 8px;
+  }
+
+  /* Random jumps above the question and sits top-right, so the title reads
+     cleanly on its own line below it. */
+  .gourmetMediaContainer .containerTitleRow {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .gourmetMediaContainer .containerTitleRow > :not(h2) {
+    align-self: flex-end;
   }
 
   .gourmetMediaContainer .selectButton {

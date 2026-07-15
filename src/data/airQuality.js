@@ -162,6 +162,38 @@ export async function fetchAirQuality(latitude, longitude) {
   return { current: data.current, nowcast, history };
 }
 
+// Current weather over the point — cloud cover, precipitation, code and temp —
+// from Open-Meteo's forecast API (free, CORS-open, no key, same family as the
+// air-quality feed). ONLY used to tint the optional "show sky?" background more
+// truthfully (overcast greys it, rain darkens it), so like the alert/monitor
+// garnishes it never blocks and resolves to null on any failure. Fahrenheit
+// because the audience is US ZIP/city lookups.
+async function fetchWeather(latitude, longitude) {
+  try {
+    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    url.searchParams.set('latitude', latitude);
+    url.searchParams.set('longitude', longitude);
+    url.searchParams.set('current', 'temperature_2m,precipitation,cloud_cover,weather_code,is_day');
+    url.searchParams.set('temperature_unit', 'fahrenheit');
+    url.searchParams.set('timezone', 'auto');
+    const { ok, data } = await fetchJson(url, { label: 'Weather', retries: 0 });
+    const c = ok ? data?.current : null;
+    if (!c) return null;
+    return {
+      tempF: c.temperature_2m ?? null,
+      precip: c.precipitation ?? 0, // mm in the last hour
+      cloudCover: c.cloud_cover ?? 0, // %
+      code: c.weather_code ?? null, // WMO code
+      isDay: c.is_day === 1,
+      // Seconds to add to UTC for the place's wall-clock time — lets the sky
+      // caption show the actual local time without a separate timezone lookup.
+      utcOffsetSec: data.utc_offset_seconds ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // The REAL measured reading, via our own serverless proxy (/api/airnow holds
 // the AirNow key server-side). Returns the distilled observation or null — a
 // failure or an unmonitored area just means "no measurement, use the model," so
@@ -200,6 +232,8 @@ export async function getByQuery(query) {
   // Any active NWS air-quality alert for this point (Air Quality Alert, smoke,
   // dust, ozone…). Garnish like the other two: null on failure, never blocks.
   const alertsP = fetchAirAlerts(latitude, longitude);
+  // Current weather for the optional sky tint — also a null-on-failure garnish.
+  const weatherP = fetchWeather(latitude, longitude);
 
   try {
     const { current, nowcast, history } = await fetchAirQuality(latitude, longitude);
@@ -211,6 +245,7 @@ export async function getByQuery(query) {
       monitor: await monitorP,
       measured: await measuredP,
       alert: await alertsP,
+      weather: await weatherP,
     };
   } catch (liveErr) {
     // The live CAMS model API is a single point of failure. Rather than blank
@@ -230,6 +265,7 @@ export async function getByQuery(query) {
       monitor: await monitorP,
       measured,
       alert: await alertsP,
+      weather: await weatherP,
       fallback: typical ? { kind: 'typical-annual', distanceMi: typical.distanceMi } : null,
     };
   }

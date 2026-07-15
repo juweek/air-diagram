@@ -87,31 +87,69 @@ export async function getAirnow(lat, lon, apiKey, { distance = 50 } = {}) {
   }
   if (!Array.isArray(obs) || obs.length === 0) return { available: false, reason: 'no-station' };
 
+  // EPA "Current Air Quality" is the MAXIMUM of the per-pollutant AQIs in the
+  // reporting area (not a single primary-pollutant reading). We keep each
+  // parameter for the chips, and surface that max as `aqi` for the odometer.
   const parameters = {};
   let aqi = null;
   let driver = null;
+  let lead = null; // the observation that owns the overall AQI (timestamp + area)
   for (const o of obs) {
-    if (o.AQI == null) continue;
+    // AirNow uses negative AQI as "missing" — never let it win the max.
+    if (o.AQI == null || o.AQI < 0) continue;
     parameters[o.ParameterName] = { aqi: o.AQI, category: o.Category?.Name ?? null };
     if (aqi == null || o.AQI > aqi) {
       aqi = o.AQI;
       driver = o.ParameterName;
+      lead = o;
     }
   }
-  if (aqi == null) return { available: false, reason: 'no-aqi' };
+  if (aqi == null || !lead) return { available: false, reason: 'no-aqi' };
 
-  const first = obs[0];
   return {
     available: true,
-    reportingArea: first.ReportingArea ?? null,
-    stateCode: first.StateCode ?? null,
+    reportingArea: lead.ReportingArea ?? null,
+    stateCode: lead.StateCode ?? null,
     // Representative coordinates of the reporting area — the client turns this
     // into "the actual reading is N miles from your search."
-    areaLat: first.Latitude ?? null,
-    areaLon: first.Longitude ?? null,
-    observedAt: `${first.DateObserved} ${String(first.HourObserved).padStart(2, '0')}:00 ${first.LocalTimeZone}`,
+    areaLat: lead.Latitude ?? null,
+    areaLon: lead.Longitude ?? null,
+    observedAt: formatObservedAt(lead.DateObserved, lead.HourObserved, lead.LocalTimeZone),
     parameters,
-    aqi,
-    driver, // 'PM2.5' | 'O3' | 'PM10'
+    aqi, // overall Current AQI (= max of parameters)
+    driver, // primary pollutant driving that overall — 'PM2.5' | 'O3' | 'PM10'
   };
+}
+
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+// "2026-07-15" + 8 + "PST" → "July 15, 2026. 8:00am PST"
+function formatObservedAt(dateObserved, hourObserved, tz) {
+  if (!dateObserved && dateObserved !== 0) return null;
+  const parts = String(dateObserved).trim().split(/[-/]/);
+  if (parts.length < 3) {
+    return `${dateObserved} ${String(hourObserved).padStart(2, '0')}:00 ${tz ?? ''}`.trim();
+  }
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  const h24 = Number(hourObserved) || 0;
+  const ampm = h24 >= 12 ? 'pm' : 'am';
+  const h12 = h24 % 12 || 12;
+  const month = MONTHS[m - 1] ?? String(m);
+  const zone = tz ? ` ${tz}` : '';
+  return `${month} ${d}, ${y}. ${h12}:00${ampm}${zone}`;
 }

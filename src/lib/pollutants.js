@@ -23,7 +23,9 @@ export const POLLUTANTS = [
     range: [0, 40],
     who: 5, // WHO annual guideline
     legal: 9, // EPA annual NAAQS (2024; was 12)
-    color: '#E6D3A0',
+    // Dark blood-red — PM2.5 is the headline health threat, and the ominous hue
+    // reads that way against the charcoal (bright enough to still glow additive).
+    color: '#C42B22',
     centered: true,
     blurb:
       'Fine particles under 2.5 microns — small enough to lodge deep in the lungs and cross into the blood. Mostly combustion: traffic, smoke, industry.',
@@ -61,7 +63,9 @@ export const POLLUTANTS = [
     range: [0, 60],
     who: 25, // WHO 24-hour
     legal: 188, // EPA 1-hour NAAQS (100 ppb ≈ 188 µg/m³)
-    color: '#F0665F',
+    // Near-white: NO₂'s old red now clashed with PM2.5's blood-red, so the
+    // tailpipe gas reads as a bright neutral speck instead.
+    color: '#EDEAE0',
     blurb:
       'Nitrogen dioxide — the signature gas of tailpipes and gas stoves. Inflames airways; a good tracer of fresh traffic exhaust near you.',
   },
@@ -145,7 +149,7 @@ export function exceedance(def, value, mode = 'legal') {
 // public-health advice keyed to the same category breakpoints as aqiCategory();
 // the UI links to AirNow so the reader can see the full guidance.
 const AQI_GUIDANCE = [
-  { max: 50, text: 'No precautions needed — a good day to be outside.' },
+  { max: 50, text: 'No precautions needed' },
   {
     max: 100,
     text: 'Fine for almost everyone. Unusually sensitive people should consider shortening long, intense outdoor exertion.',

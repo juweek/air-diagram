@@ -28,6 +28,7 @@
  */
 export default function GourmetMediaContainer({
   title,
+  titleAction,
   intro,
   views,
   view,
@@ -43,7 +44,14 @@ export default function GourmetMediaContainer({
 
   return (
     <div className="gourmetMediaContainer">
-      {title && <h2>{title}</h2>}
+      {/* The title shares its baseline row with an optional action (e.g. the
+         "Random" jump), which sits flush-right and wraps below on narrow cards. */}
+      {(title || titleAction) && (
+        <div className="containerTitleRow">
+          {title && <h2>{title}</h2>}
+          {titleAction}
+        </div>
+      )}
       {intro && <i className="containerIntro">{intro}</i>}
 
       {(showDropdown || controls) && (
