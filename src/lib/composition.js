@@ -45,7 +45,7 @@ const map = (v, a, b, c, d) => c + ((v - a) / (b - a)) * (d - c);
 // only scales the source view — the pollutant rings are untouched.
 export function densityScale() {
   if (typeof window === 'undefined') return 1;
-  return window.innerWidth < 700 ? 1.1 : 1.6;
+  return window.innerWidth < 700 ? 1.5 : 2.4;
 }
 
 // Turn a set of current readings into source fractions (summing to 1) plus an
@@ -103,7 +103,7 @@ export function particleBreakdown(current, mode = 'legal') {
   const scale = densityScale();
   // Sparse on purpose: a breath is ~99.99% N₂/O₂/Ar. The swarm is an intensity
   // diagram, not a particle census — keep the field mostly empty dark.
-  const total = Math.round(map(ratio, 0, 6, 18, 420) * scale);
+  const total = Math.round(map(ratio, 0, 6, 28, 700) * scale);
 
   const sources = {};
   for (const s of SOURCES) {
@@ -111,7 +111,7 @@ export function particleBreakdown(current, mode = 'legal') {
   }
   // Ultrafine dominates the heavy-combustion scenarios (cigarette, joint); a
   // lower multiplier keeps those fields from overwhelming the canvas.
-  const ultrafine = Math.round(comp.ultrafineIndex * 70 * scale);
+  const ultrafine = Math.round(comp.ultrafineIndex * 110 * scale);
 
   return { sources, ultrafine, total, fractions: comp.fractions, line, ratio };
 }

@@ -312,7 +312,7 @@ export function airParticleSketch(p, data) {
     // Every orb is one drawImage per frame, so cap the field and subsample
     // proportionally when a heavy scenario (cigarette, wildfire) would blow
     // past it — a dense field still reads dense, and the frame stays smooth.
-    const MAX_SPECKS = typeof window !== 'undefined' && window.innerWidth < 700 ? 550 : 900;
+    const MAX_SPECKS = typeof window !== 'undefined' && window.innerWidth < 700 ? 750 : 1300;
     const visible = SOURCES.filter((s) => !hidden.includes(s.key)).map((s) => ({
       color: s.color,
       size: s.size,

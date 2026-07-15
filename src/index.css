@@ -94,25 +94,23 @@
   /* (The old .glitch-texture hero treatment was replaced by the HeroBars SVG
      in AirPage.jsx — a bar-chart skyline whose tops fade into the charcoal.) */
 
-  /* Hero skyline: bars rise once on load. Transform-only so it's cheap. */
-  @keyframes hero-bar-rise {
-    from {
-      transform: scaleY(0);
-      opacity: 0;
+  /* Hero skyline: a soft continuous opacity pulse — transform-free, cheap. */
+  @keyframes hero-bar-breathe {
+    0%,
+    100% {
+      opacity: 0.26;
     }
-    to {
-      transform: scaleY(1);
-      opacity: 1;
+    50% {
+      opacity: 0.4;
     }
   }
-  .hero-bar {
-    transform-box: fill-box;
-    transform-origin: bottom center;
-    animation: hero-bar-rise 1.05s cubic-bezier(0.22, 1, 0.36, 1) both;
+  .hero-bars {
+    animation: hero-bar-breathe 5.5s ease-in-out infinite;
   }
   @media (prefers-reduced-motion: reduce) {
-    .hero-bar {
+    .hero-bars {
       animation: none;
+      opacity: 0.32;
     }
   }
 }

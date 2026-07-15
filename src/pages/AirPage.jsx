@@ -94,15 +94,13 @@ export default function AirPage() {
   const current = hasResult ? state.data.current : null;
 
   // Stable objects so each P5Sketch only remounts on a real data change.
-  // Source/baseline: one canvas. By-pollutant: a carousel of three ring views
-  // (today’s air / WHO / legal) — only one sketch is mounted at a time.
+  // Source/baseline: one canvas. By-pollutant: a single ring canvas for today’s
+  // reading (hover names each ring). Source field always scales against legal.
   const sketchData = useMemo(
     () => ({ current, view: hasResult ? view : 'baseline', mode: 'legal', hidden }),
     [current, hasResult, view, hidden]
   );
   const ringsCurrent = useMemo(() => ({ current, view: 'rings', mode: 'current' }), [current]);
-  const ringsWho = useMemo(() => ({ current, view: 'rings', mode: 'who' }), [current]);
-  const ringsLegal = useMemo(() => ({ current, view: 'rings', mode: 'legal' }), [current]);
   const showRings = hasResult && view === 'rings';
 
   // One source line, reused by the container footer AND the by-source readout
@@ -166,13 +164,9 @@ export default function AirPage() {
           <div className="flex flex-wrap items-start justify-center gap-6 text-left">
             {showRings ? (
               <div className="w-full max-w-[560px] flex-1 basis-[420px]">
-                <RingCarousel
-                  slides={[
-                    { key: 'current', label: 'Today’s air', data: ringsCurrent },
-                    { key: 'who', label: 'WHO health line', data: ringsWho },
-                    { key: 'legal', label: 'US legal line', data: ringsLegal },
-                  ]}
-                />
+                <div className="mx-auto max-w-[400px] rounded-lg bg-cream p-2">
+                  <RingPanel label="Today’s air" data={ringsCurrent} />
+                </div>
               </div>
             ) : (
               <div className="w-full max-w-[560px] flex-1 basis-[420px]">
@@ -239,18 +233,9 @@ function HeroBars() {
           <rect width="1200" height="150" fill="url(#heroBarFade)" />
         </mask>
       </defs>
-      <g mask="url(#heroBarMask)" fill="rgb(var(--sand))" opacity="0.32">
+      <g mask="url(#heroBarMask)" className="hero-bars" fill="rgb(var(--sand))">
         {bars.map((b, i) => (
-          <rect
-            key={i}
-            className="hero-bar"
-            x={b.x}
-            y={150 - b.h}
-            width={b.w}
-            height={b.h}
-            rx="1"
-            style={{ animationDelay: `${(i % 40) * 18}ms` }}
-          />
+          <rect key={i} x={b.x} y={150 - b.h} width={b.w} height={b.h} rx="1" />
         ))}
       </g>
     </svg>
@@ -281,119 +266,23 @@ function ScenarioBar({ active, onPick }) {
   );
 }
 
-/* ── RingCarousel: one pollutant-ring canvas at a time. Three slides —
-   today’s air (vs typical urban range), WHO health line, US legal line —
-   so the same breath is judged three ways without stacking canvases. Swipe
-   sideways (or use the dots / arrows) to cycle; only the active slide mounts
-   a P5Sketch, so the other two cost nothing until shown. ─────────────────── */
-const RING_SWIPE_PX = 48;
-
-function RingCarousel({ slides }) {
-  const [index, setIndex] = useState(0);
-  const [dragX, setDragX] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const start = useRef(null); // { x, y, axis: null | 'x' | 'y' }
-  const n = slides.length;
-  const go = (i) => setIndex(((i % n) + n) % n);
-  const slide = slides[index];
-
-  const onPointerDown = (e) => {
-    if (e.pointerType === 'touch' && e.isPrimary === false) return;
-    start.current = { x: e.clientX, y: e.clientY, axis: null };
-    setDragging(true);
-    setDragX(0);
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-  };
-  const onPointerMove = (e) => {
-    if (!start.current) return;
-    const dx = e.clientX - start.current.x;
-    const dy = e.clientY - start.current.y;
-    // Lock to an axis once the gesture commits, so vertical page scroll wins
-    // when the finger mostly moves up/down (Tinder-style horizontal only).
-    if (!start.current.axis) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      start.current.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
-    }
-    if (start.current.axis === 'y') return;
-    setDragX(dx);
-  };
-  const onPointerUp = () => {
-    if (!start.current) return;
-    if (start.current.axis === 'x') {
-      if (dragX <= -RING_SWIPE_PX) go(index + 1);
-      else if (dragX >= RING_SWIPE_PX) go(index - 1);
-    }
-    start.current = null;
-    setDragging(false);
-    setDragX(0);
-  };
-
+/* ── RingPanel: one labeled pollutant-ring canvas for today’s reading.
+   Density is scaled against a typical urban range (not WHO/legal), and hover
+   still names each ring via the sketch’s in-canvas tooltip. ──────────────── */
+function RingPanel({ label, data }) {
   return (
-    <div className="mx-auto max-w-[400px]">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          aria-label="Previous ring view"
-          onClick={() => go(index - 1)}
-          className="label-caps rounded-full border border-grid-strong px-3 py-1 !text-ink transition-colors hover:!border-ink"
-        >
-          ‹
-        </button>
-        <div className="min-w-0 text-center">
-          <div className="text-xs font-semibold uppercase tracking-wide text-ink">
-            {slide.label}
-          </div>
-          <div className="mt-0.5 text-[10px] text-ink-muted">
-            {index + 1} / {n} · swipe to compare
-          </div>
-        </div>
-        <button
-          type="button"
-          aria-label="Next ring view"
-          onClick={() => go(index + 1)}
-          className="label-caps rounded-full border border-grid-strong px-3 py-1 !text-ink transition-colors hover:!border-ink"
-        >
-          ›
-        </button>
+    <div>
+      <div className="py-1 text-center text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        {label}
       </div>
-
-      <div
-        className="touch-pan-y select-none overflow-hidden rounded-lg bg-cream p-2"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      >
-        <div
-          className={dragging ? '' : 'transition-transform duration-200 ease-out'}
-          style={{ transform: `translateX(${dragX * 0.35}px)` }}
-        >
-          <P5Sketch key={slide.key} sketch={airParticleSketch} data={slide.data} />
-        </div>
-      </div>
-
-      <div className="mt-3 flex justify-center gap-2" role="tablist" aria-label="Ring views">
-        {slides.map((s, i) => (
-          <button
-            key={s.key}
-            type="button"
-            role="tab"
-            aria-selected={i === index}
-            aria-label={s.label}
-            onClick={() => go(i)}
-            className={`h-2 w-2 rounded-full transition-colors ${
-              i === index ? 'bg-ink' : 'bg-grid-strong hover:bg-ink/50'
-            }`}
-          />
-        ))}
-      </div>
+      <P5Sketch sketch={airParticleSketch} data={data} />
     </div>
   );
 }
 
-/* ── Controls: the single "View" toggle. By-pollutant is a carousel of three
-   ring judgments (today / WHO / legal); the source field always renders against
-   the legal line (the "Good" line the piece critiques). ───────────────────── */
+/* ── Controls: the single "View" toggle. By-pollutant shows today’s reading as
+   rings; the source field always renders against the legal line (the "Good"
+   line the piece critiques). ─────────────────────────────────────────────── */
 function Controls({ view, onView }) {
   return (
     <Segmented
@@ -593,19 +482,13 @@ function TrendBars({ history }) {
   // Oldest → newest, so the most recent reading is always the rightmost bar.
   const series = [...history].sort((a, b) => (a.time < b.time ? -1 : 1));
   const max = Math.max(...series.map((h) => h.value), 1);
-  // Trend word: the last 3 hours against the 3 before them.
-  const avg = (arr) => arr.reduce((a, b) => a + b.value, 0) / (arr.length || 1);
-  const tail = avg(series.slice(-3));
-  const prev = avg(series.slice(-6, -3));
-  const trend = tail > prev * 1.15 ? '↑ rising' : tail < prev * 0.85 ? '↓ easing' : '→ steady';
   const first = timeParts(series[0].time);
   const last = timeParts(series[series.length - 1].time);
 
   return (
     <div className="mb-3 mt-5 pt-1">
-      <div className="mb-1 flex items-baseline justify-between gap-2">
+      <div className="mb-1">
         <span className="label-caps">PM2.5 · last {series.length} hrs</span>
-        <span className="text-[11px] tabular-nums text-ink-muted">{trend}</span>
       </div>
       <div className="relative flex h-12 items-end gap-px" onMouseLeave={() => setHover(null)}>
         {series.map((h, i) => {
@@ -703,7 +586,6 @@ function SourceLink({ source }) {
 
 function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor }) {
   if (measured) {
-    const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
     return (
       <Section title="Source">
         <p className="mb-3 pb-1 text-[11px] leading-snug text-ink">
@@ -712,34 +594,6 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
           {measured.distanceMi != null && <> ({measured.distanceMi} mi away)</>}, {measured.observedAt},
           via AirNow (US EPA).
         </p>
-        {keys.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {keys.map((k) => {
-              const p = measured.parameters[k];
-              const isDriver = k === measured.driver;
-              const cat = aqiCategory(p.aqi);
-              return (
-                <Tip key={k} text={POLLUTANT_BLURBS[k] ?? POLLUTANT_BLURBS[MEASURED_LABELS[k]]}>
-                  <span
-                    className={`inline-flex cursor-help items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
-                      isDriver
-                        ? 'border-ink bg-ink font-semibold text-cream'
-                        : 'border-grid-strong text-ink'
-                    }`}
-                  >
-                    {MEASURED_LABELS[k]}
-                    <span
-                      className="font-bold tabular-nums"
-                      style={isDriver ? undefined : { color: cat.color }}
-                    >
-                      {p.aqi}
-                    </span>
-                  </span>
-                </Tip>
-              );
-            })}
-          </div>
-        )}
       </Section>
     );
   }
@@ -792,27 +646,114 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
   );
 }
 
-/* ── ModelComparisonSection: the measured/model gap made explicit, in its own
-   titled section. Only shown when a real reading is the headline — it contrasts
-   that reading with what the CAMS model most apps use would have said here, and
-   carries the note that the particle makeup below is modeled from the CAMS air. */
-function ModelComparisonSection({ modeled, measuredAqi }) {
-  const delta = modeled.aqi - measuredAqi;
-  const rel =
-    delta > 4
-      ? `higher than the ${measuredAqi} measured above`
-      : delta < -4
-        ? `lower than the ${measuredAqi} measured above`
-        : `close to the ${measuredAqi} measured above`;
+/* ── MeasuredPills: the AirNow PM2.5 / O₃ / PM10 chips. Live under the odometer
+   and above the Source block so the headline number’s ingredients are visible
+   before the provenance copy. Hover blurbs unchanged. ─────────────────────── */
+function MeasuredPills({ measured }) {
+  if (!measured) return null;
+  const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
+  if (keys.length === 0) return null;
   return (
-    <Section title="What most phone apps show">
-      <p className="text-[11px] leading-snug text-ink-muted">
-        Most phone apps interpolate the <strong>CAMS model</strong>, which reads{' '}
-        <strong>{modeled.aqi}</strong>
-        {modeled.driver ? ` (${modeled.driver})` : ''} here — {rel}. The particle makeup below is
-        modeled from that CAMS air.
+    <div className="mb-2 mt-1 flex flex-wrap gap-1">
+      {keys.map((k) => {
+        const p = measured.parameters[k];
+        const isDriver = k === measured.driver;
+        const cat = aqiCategory(p.aqi);
+        return (
+          <Tip key={k} text={POLLUTANT_BLURBS[k] ?? POLLUTANT_BLURBS[MEASURED_LABELS[k]]}>
+            <span
+              className={`inline-flex cursor-help items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                isDriver
+                  ? 'border-ink bg-ink font-semibold text-cream'
+                  : 'border-grid-strong text-ink'
+              }`}
+            >
+              {MEASURED_LABELS[k]}
+              <span
+                className="font-bold tabular-nums"
+                style={isDriver ? undefined : { color: cat.color }}
+              >
+                {p.aqi}
+              </span>
+            </span>
+          </Tip>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── MeasuredComparisonSection: CAMS model vs a real monitor reading, as two
+   AQI bars. Always shown when a live model number exists — if no monitor is
+   nearby the "measured" bar stays empty so the gap itself is the point. ──── */
+function MeasuredComparisonSection({ modeled, measured }) {
+  const measuredAqi = measured?.aqi ?? null;
+  const modelAqi = modeled?.aqi ?? null;
+  if (modelAqi == null && measuredAqi == null) return null;
+  const top = Math.max(modelAqi ?? 0, measuredAqi ?? 0, 50);
+
+  return (
+    <Section title="What’s been measured?">
+      <div className="grid gap-2">
+        <CompareBar
+          label="CAMS model"
+          value={modelAqi}
+          top={top}
+          note={modeled?.driver ? `driver: ${modeled.driver}` : null}
+        />
+        <CompareBar
+          label="Monitor"
+          value={measuredAqi}
+          top={top}
+          emptyLabel="Unavailable"
+          note={
+            measured
+              ? `${measured.reportingArea}${measured.distanceMi != null ? ` · ${measured.distanceMi} mi` : ''}`
+              : 'No nearby AirNow reading'
+          }
+        />
+      </div>
+      <p className="mt-2 text-[10px] leading-snug text-ink-muted">
+        Most phone apps show the CAMS model. The particle makeup below is modeled from that CAMS
+        air
+        {measuredAqi != null ? ', even when a monitor drives the headline above' : ''}.
       </p>
     </Section>
+  );
+}
+
+function CompareBar({ label, value, top, note, emptyLabel = '—' }) {
+  const available = value != null;
+  const pct = available ? Math.min(value / top, 1) * 100 : 0;
+  const cat = available ? aqiCategory(value) : null;
+  return (
+    <div className={`rounded-md border px-2.5 py-2 ${available ? 'border-grid-strong' : 'border-dashed border-grid-strong/70 opacity-60'}`}>
+      <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="font-semibold text-ink">{label}</span>
+        <span className="tabular-nums text-ink-muted">
+          {available ? (
+            <>
+              <strong className="text-ink" style={{ color: cat.color }}>
+                {value}
+              </strong>{' '}
+              AQI
+            </>
+          ) : (
+            emptyLabel
+          )}
+        </span>
+      </div>
+      <span className="block h-2 overflow-hidden rounded-full bg-grid-medium">
+        <span
+          className="block h-full rounded-full transition-[width] duration-300"
+          style={{
+            width: `${pct}%`,
+            background: available ? cat.color : 'transparent',
+          }}
+        />
+      </span>
+      {note && <p className="mt-1 text-[10px] leading-snug text-ink-muted">{note}</p>}
+    </div>
   );
 }
 
@@ -825,14 +766,13 @@ function Readout({ result, view, hidden, onToggle, source }) {
   const measured = result.measured?.available ? result.measured : null;
   const displayAqi = measured ? measured.aqi : modeled.aqi;
   const category = aqiCategory(displayAqi);
-  // The model comparison only makes sense against a live model AQI (not the
+  // The comparison only makes sense against a live model AQI (not the
   // typical-annual fallback).
   const modelForCompare = result.fallback ? null : modeled;
 
   return (
     // The cap tracks the diagram beside it. Fixed px, not vh — see the preview
-    // quirk in CLAUDE.md. One ring canvas now (carousel), so the readout can
-    // stay at the same height as the source view.
+    // quirk in CLAUDE.md.
     <div className="max-h-[560px] overflow-y-auto rounded-lg border border-grid-strong bg-cream/60 p-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-display text-2xl italic">{location.name}</h3>
@@ -845,6 +785,7 @@ function Readout({ result, view, hidden, onToggle, source }) {
       </div>
 
       <AqiMeter aqi={displayAqi} category={category} />
+      <MeasuredPills measured={measured} />
       <SourceLink source={source} />
 
       {/* Provenance, directly under the reading — above the dividing rule. */}
@@ -859,8 +800,8 @@ function Readout({ result, view, hidden, onToggle, source }) {
 
       <TrendBars history={result.history} />
 
-      {measured && modelForCompare?.aqi != null && (
-        <ModelComparisonSection modeled={modelForCompare} measuredAqi={measured.aqi} />
+      {modelForCompare?.aqi != null && (
+        <MeasuredComparisonSection modeled={modelForCompare} measured={measured} />
       )}
 
       <div className="mt-4 border-t border-grid-strong pt-4">
