@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAsync } from '../lib/useAsync';
 import { getByQuery } from '../data/airQuality';
-import { POLLUTANTS, aqiCategory } from '../lib/pollutants';
+import { POLLUTANTS, aqiCategory, aqiGuidance, POLLUTANT_BLURBS } from '../lib/pollutants';
+import { pm25Aqi } from '../lib/nowcast';
 import { SOURCES, ULTRAFINE, particleBreakdown } from '../lib/composition';
 import { SCENARIOS } from '../data/scenarios';
 import LookupInput from '../components/LookupInput';
@@ -19,13 +20,40 @@ const SOURCE_BASE = 'https://open-meteo.com/en/docs/air-quality-api';
 
 // The source link points at the API docs. Once we know the place, we deep-link
 // to the exact coordinates we queried so "Source" reproduces this reading.
-function sourceFor(location) {
+// When a real AirNow reading drives the headline, AirNow leads the credit —
+// the model is then only behind the particle makeup, and the label says so.
+function sourceFor(location, measured = false) {
+  if (measured) {
+    return {
+      label: 'AirNow (US EPA) — measured AQI · particle makeup modeled via Open-Meteo (CAMS)',
+      url: 'https://www.airnow.gov/',
+    };
+  }
   // Scenarios carry their own `source` (handled by the caller) and have no
   // coordinates, so only deep-link when we have real numbers.
   if (typeof location?.latitude !== 'number') return { label: SOURCE_LABEL, url: SOURCE_BASE };
   const lat = location.latitude.toFixed(3);
   const lon = location.longitude.toFixed(3);
   return { label: SOURCE_LABEL, url: `${SOURCE_BASE}?latitude=${lat}&longitude=${lon}` };
+}
+
+// Places the "Try someplace new" button can land on — a deliberate mix of
+// clean, smoggy, smoky and dusty US air so the roll teaches the range. A
+// static list keeps it instant (the only cost is the normal lookup the
+// navigation triggers, and useAsync caches repeats).
+const RANDOM_PLACES = [
+  'Detroit', 'Phoenix', 'Fresno', 'Bakersfield', 'Visalia', 'Los Angeles', '90001',
+  'Pittsburgh', 'Houston', 'Denver', 'Salt Lake City', 'Boise', 'Missoula', 'Spokane',
+  'Chicago', 'Seattle', 'Portland', 'Albuquerque', 'El Paso', 'Las Vegas', 'Reno',
+  'Fairbanks', 'Anchorage', 'Honolulu', 'Miami', 'Atlanta', 'Minneapolis', 'St. Louis',
+  'New Orleans', 'New York',
+];
+function randomPlace(exclude) {
+  let pick;
+  do {
+    pick = RANDOM_PLACES[Math.floor(Math.random() * RANDOM_PLACES.length)];
+  } while (pick.toLowerCase() === exclude && RANDOM_PLACES.length > 1);
+  return pick;
 }
 
 // The full US EPA AQI scale (0–500) as a segmented bar. Spans are the AQI range
@@ -54,7 +82,6 @@ export default function AirPage() {
   const state = useAsync(getByQuery, query);
 
   const [view, setView] = useState('source'); // 'source' | 'rings'
-  const [mode, setMode] = useState('legal'); // 'legal' | 'who'
   // Source keys the viewer has switched off in the "what's in a breath" list;
   // hidden specks are dropped from the diagram too. Immutable array so the
   // sketch memo below sees a new reference and remounts on every toggle.
@@ -67,44 +94,67 @@ export default function AirPage() {
 
   // Stable objects so each P5Sketch only remounts on a real data change.
   // The source/baseline view uses one canvas (sketchData); the pollutant view
-  // uses two — the same rings measured against the WHO line and the legal line
-  // side by side — so it gets its own pair of memoized data objects.
+  // uses two — the same rings against the WHO line and the legal line side by
+  // side — so it gets its own pair of memoized data objects. There's no
+  // legal/WHO toggle any more: the source field always renders the current
+  // readings scaled against the legal line (the "Good" line the piece critiques),
+  // and the legal-vs-WHO contrast lives entirely in the two by-pollutant rings.
   const sketchData = useMemo(
-    () => ({ current, view: hasResult ? view : 'baseline', mode, hidden }),
-    [current, hasResult, view, mode, hidden]
+    () => ({ current, view: hasResult ? view : 'baseline', mode: 'legal', hidden }),
+    [current, hasResult, view, hidden]
   );
   const ringsWho = useMemo(() => ({ current, view: 'rings', mode: 'who' }), [current]);
   const ringsLegal = useMemo(() => ({ current, view: 'rings', mode: 'legal' }), [current]);
   const showRings = hasResult && view === 'rings';
 
   // One source line, reused by the container footer AND the by-source readout
-  // section. Scenarios carry their own; places deep-link to their coordinates.
-  const source = hasResult ? (state.data.source ?? sourceFor(state.data.location)) : sourceFor(null);
+  // section. Scenarios carry their own; places deep-link to their coordinates —
+  // and when a real AirNow reading is the headline, AirNow leads the credit.
+  const source = hasResult
+    ? (state.data.source ?? sourceFor(state.data.location, !!state.data.measured?.available))
+    : sourceFor(null);
 
   return (
     <div>
-      {/* ── Editorial hero. The glitch texture bleeds from the top edge and
-         fades into the ground (Style-2 "1c"); the italic serif headline sits
-         over it, then the thesis, search and scenario links. ────────────── */}
-      <section className="relative -mt-2 mb-8 pt-6">
-        <div className="glitch-texture" aria-hidden />
-        <div className="relative">
-          <p className="label-caps mb-4">— A brief reckoning —</p>
-          <h2 className="font-display text-4xl italic leading-[1.05] text-ink-bright sm:text-6xl">
-            What’s actually
-            <br />
-            in the air.
-          </h2>
-          <p className="mb-6 mt-5 max-w-prose font-display text-lg leading-relaxed text-ink-muted">
-            The green “Good” badge hides two things: a legal line that’s far looser than the health
-            line, and what’s actually in a breath. Search a place to see its air drawn particle by
-            particle.
-          </p>
+      {/* ── Editorial hero, landing-page centered: eyebrow, headline, then a
+         band of "bar chart" lines rising out of the charcoal (they fade from
+         nothing at their tops into solid at the baseline), thesis, a large
+         centered search, and the scenario / random-place links. ──────────── */}
+      <section className="relative -mt-2 mb-8 pt-6 text-center">
+        <p className="label-caps mb-4">— A brief reckoning —</p>
+        <h2 className="font-display text-4xl italic leading-[1.05] text-ink-bright sm:text-6xl">
+          What’s actually
+          <br />
+          in the air.
+        </h2>
 
-          <LookupInput defaultValue={query} onSubmit={(q) => navigate(`/${encodeURIComponent(q)}`)} />
+        <HeroBars />
 
-          <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
+        <p className="mx-auto mb-7 mt-6 max-w-prose font-display text-lg leading-relaxed text-ink-muted">
+          The green “Good” badge hides two things: a legal line that’s far looser than the health
+          line, and what’s actually in a breath. Search a place to see its air drawn particle by
+          particle.
+        </p>
+
+        <div className="mx-auto max-w-xl">
+          <LookupInput
+            large
+            defaultValue={query}
+            onSubmit={(q) => navigate(`/${encodeURIComponent(q)}`)}
+          />
         </div>
+
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={() => navigate(`/${encodeURIComponent(randomPlace(query.toLowerCase()))}`)}
+            className="label-caps rounded-full border border-grid-strong px-4 py-2 !text-ink transition-colors hover:!border-ink hover:!text-ink-bright"
+          >
+            ↺ Try someplace new
+          </button>
+        </div>
+
+        <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
       </section>
 
       {state.status === 'loading' && <Loading label={`Looking up ${query}…`} />}
@@ -113,9 +163,10 @@ export default function AirPage() {
       <div className="mt-6">
         <GourmetMediaContainer
           title={hasResult ? `What’s in the air in ${state.data.location.name}?` : 'What’s in the air?'}
-          controls={hasResult ? <Controls view={view} mode={mode} onView={setView} onMode={setMode} /> : null}
+          controls={hasResult ? <Controls view={view} onView={setView} /> : null}
           source={source}
         >
+          {hasResult && state.data.alert && <AlertBanner alert={state.data.alert} />}
           <div className="flex flex-wrap items-start justify-center gap-6 text-left">
             {showRings ? (
               // Two ring canvases stacked vertically inside one cream panel — the
@@ -141,7 +192,6 @@ export default function AirPage() {
                 <Readout
                   result={state.data}
                   view={view}
-                  mode={mode}
                   hidden={hidden}
                   onToggle={toggleSource}
                   source={source}
@@ -157,11 +207,55 @@ export default function AirPage() {
   );
 }
 
+/* ── HeroBars: the hero's "bar chart rising out of the charcoal" band. A fixed
+   pseudo-random skyline of thin bars whose TOPS fade to nothing (a vertical
+   mask runs transparent→solid downward), so the lines emerge from the ground
+   the way the readings emerge from the dark. Deterministic seed → the skyline
+   is identical on every render (no re-randomizing, no layout shift). ──────── */
+function HeroBars() {
+  const bars = useMemo(() => {
+    let seed = 41;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const n = 120;
+    return Array.from({ length: n }, (_, i) => ({
+      x: (i / n) * 1200,
+      w: (1200 / n) * 0.5,
+      h: 14 + rand() * (rand() < 0.18 ? 128 : 78), // mostly short, a few spikes
+    }));
+  }, []);
+  return (
+    <svg
+      viewBox="0 0 1200 150"
+      preserveAspectRatio="none"
+      className="mt-8 h-24 w-full sm:h-36"
+      aria-hidden
+    >
+      <defs>
+        {/* Mask: white = visible. Transparent at the top → each bar's tip
+           dissolves into the charcoal; solid at the baseline. */}
+        <linearGradient id="heroBarFade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" />
+          <stop offset="0.45" stopColor="#fff" stopOpacity="0.35" />
+          <stop offset="1" stopColor="#fff" stopOpacity="1" />
+        </linearGradient>
+        <mask id="heroBarMask">
+          <rect width="1200" height="150" fill="url(#heroBarFade)" />
+        </mask>
+      </defs>
+      <g mask="url(#heroBarMask)" fill="rgb(var(--sand))" opacity="0.32">
+        {bars.map((b, i) => (
+          <rect key={i} x={b.x} y={150 - b.h} width={b.w} height={b.h} rx="1" />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
 /* ── ScenarioBar: quick presets to compare against a cigarette, wildfire, etc.
    Each just navigates to /:id — the scenario is a real, shareable address. ── */
 function ScenarioBar({ active, onPick }) {
   return (
-    <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
+    <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
       <span className="label-caps">Or a scenario</span>
       {SCENARIOS.map((s) => (
         <button
@@ -193,10 +287,11 @@ function RingPanel({ label, data }) {
   );
 }
 
-/* ── Controls: the segmented pill toggles ─────────────────────────────────────
-   "Measured against" only appears in the source view — the by-pollutant view
-   now shows BOTH lines side by side, so it has nothing to toggle. */
-function Controls({ view, mode, onView, onMode }) {
+/* ── Controls: the single "View" toggle. There's no "Measured against" toggle
+   any more — the by-pollutant view already shows the WHO and legal lines side
+   by side, and the source field renders the current readings directly, so the
+   legal/WHO switch was redundant. ─────────────────────────────────────────── */
+function Controls({ view, onView }) {
   return (
     <div className="flex flex-wrap gap-6">
       <Segmented
@@ -208,17 +303,6 @@ function Controls({ view, mode, onView, onMode }) {
           { value: 'rings', label: 'By pollutant' },
         ]}
       />
-      {view === 'source' && (
-        <Segmented
-          label="Measured against"
-          value={mode}
-          onChange={onMode}
-          options={[
-            { value: 'legal', label: 'US legal line' },
-            { value: 'who', label: 'WHO health line' },
-          ]}
-        />
-      )}
     </div>
   );
 }
@@ -242,6 +326,194 @@ function Segmented({ label, value, onChange, options }) {
             {opt.label}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tip: a small hover tooltip. Pure CSS (group-hover), so it costs nothing
+   and works on any inline chip/label. Hidden on touch (no hover) — the copy a
+   tooltip carries must never be the ONLY place a fact lives. ──────────────── */
+function Tip({ text, children }) {
+  if (!text) return children;
+  return (
+    <span className="group/tip relative inline-flex">
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 hidden w-60 -translate-x-1/2 rounded-md border border-grid-strong bg-cream px-2.5 py-2 text-left text-[11px] font-normal normal-case leading-snug tracking-normal text-ink shadow-xl group-hover/tip:block">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+/* ── Section: a titled readout block with a dividing rule above it. The title
+   uses the same serif subtitle as "What's in this breath", so every block in
+   the right-hand column reads as a distinct, self-contained section. ──────── */
+function Section({ title, children }) {
+  return (
+    <section className="mt-4 border-t border-grid-strong pt-4">
+      {title && <h4 className="mb-1.5 font-subtitle text-base">{title}</h4>}
+      {children}
+    </section>
+  );
+}
+
+/* ── AlertBanner: an active NWS air alert for the searched point. Full-width
+   strip at the top of the result card — the one place the tool borrows an
+   OFFICIAL voice, so it's visually louder than anything modeled below it.
+   Coverage caveat: these alerts are authored by state air agencies and only
+   distributed by NWS, so silence here is not a clean bill of air. ─────────── */
+function AlertBanner({ alert }) {
+  const until =
+    alert.until &&
+    new Date(alert.until).toLocaleString([], {
+      weekday: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  return (
+    <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border border-data-primary/60 bg-data-primary/10 px-4 py-2.5 text-left">
+      <span className="label-caps !text-data-primary">⚠ NWS alert</span>
+      <span className="text-sm font-semibold text-ink-bright">{alert.event}</span>
+      {until && <span className="text-xs text-ink-muted">in effect until {until}</span>}
+      {alert.sender && <span className="text-xs text-ink-muted">· {alert.sender}</span>}
+      {alert.more > 0 && <span className="text-xs text-ink-muted">· +{alert.more} more</span>}
+      <a
+        href={alert.url}
+        target="_blank"
+        rel="noreferrer"
+        className="ml-auto text-xs underline"
+      >
+        details
+      </a>
+    </div>
+  );
+}
+
+/* ── ProvenanceBadge: says at a glance whether the headline number is a real
+   monitor reading or an estimate — pinned top-right of the readout, above the
+   gauge, so provenance is settled before the number is read. ──────────────── */
+function ProvenanceBadge({ measured, fallback, scenario }) {
+  const kind = measured
+    ? {
+        label: 'Measured',
+        solid: true,
+        tip: 'A real monitor reading (AirNow, US EPA) drives the headline number.',
+      }
+    : scenario
+      ? {
+          label: 'Illustrative',
+          tip: 'A preset scenario built from typical published concentrations — not live data anywhere.',
+        }
+      : fallback
+        ? {
+            label: 'Typical annual',
+            tip: 'Live data is unavailable — this is the nearest monitor’s 2024 annual average, not today’s air.',
+          }
+        : {
+            label: 'Modeled',
+            tip: 'No monitor reading nearby: this is the CAMS atmospheric model’s estimate (~11 km grid), interpolated to this point.',
+          };
+  return (
+    <Tip text={kind.tip}>
+      <span
+        className={`label-caps shrink-0 cursor-help rounded-full border px-2.5 py-1 ${
+          kind.solid
+            ? 'border-ink bg-ink !text-cream'
+            : 'border-dashed border-grid-strong !text-ink-muted'
+        }`}
+      >
+        {kind.label}
+      </span>
+    </Tip>
+  );
+}
+
+/* ── GuidanceSection: what to actually DO at this AQI — the crisis visitor's
+   real question, in its own titled section. Static EPA/AirNow activity guidance
+   keyed to the category bands; linked so the compressed advice is checkable. ─ */
+function GuidanceSection({ aqi }) {
+  const text = aqiGuidance(aqi);
+  if (!text) return null;
+  return (
+    <Section title={`What to do at ${aqi}`}>
+      <div className="rounded-md border-l-2 border-data-primary bg-cream/60 px-3 py-2">
+        <p className="text-xs leading-relaxed text-ink">
+          {text}{' '}
+          <a
+            href="https://www.airnow.gov/aqi/aqi-basics/"
+            target="_blank"
+            rel="noreferrer"
+            className="whitespace-nowrap underline"
+          >
+            EPA guidance
+          </a>
+        </p>
+      </div>
+    </Section>
+  );
+}
+
+// 'YYYY-MM-DDTHH:MM' (already local to the place — timezone=auto) → '8 PM'.
+function hourLabel(time) {
+  const h = parseInt(time.slice(11, 13), 10);
+  if (Number.isNaN(h)) return time.slice(11, 16);
+  const ampm = h < 12 ? 'AM' : 'PM';
+  return `${h % 12 === 0 ? 12 : h % 12} ${ampm}`;
+}
+
+/* ── TrendBars: "is it getting better?" — the last 24 hours of PM2.5 as tiny
+   bars under the gauge, each coloured by its own AQI category. Hover names the
+   hour and the µg/m³. The values are the same CAMS model series NowCast uses,
+   so this is LIVE MODEL data and the caption says so. ────────────────────── */
+function TrendBars({ history }) {
+  const [hover, setHover] = useState(null);
+  if (!history || history.length < 3) return null;
+  const max = Math.max(...history.map((h) => h.value), 1);
+  // Trend word: the last 3 hours against the 3 before them.
+  const avg = (arr) => arr.reduce((a, b) => a + b.value, 0) / (arr.length || 1);
+  const tail = avg(history.slice(-3));
+  const prev = avg(history.slice(-6, -3));
+  const trend =
+    tail > prev * 1.15 ? '↑ rising' : tail < prev * 0.85 ? '↓ easing' : '→ steady';
+
+  return (
+    <div className="mb-3">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="label-caps">PM2.5 · last {history.length} hrs</span>
+        <span className="text-[11px] tabular-nums text-ink-muted">{trend}</span>
+      </div>
+      <div
+        className="relative flex h-12 items-end gap-px"
+        onMouseLeave={() => setHover(null)}
+      >
+        {history.map((h, i) => {
+          const cat = aqiCategory(pm25Aqi(h.value));
+          return (
+            <div
+              key={h.time}
+              onMouseEnter={() => setHover(i)}
+              className="min-w-0 flex-1 cursor-help rounded-sm transition-opacity"
+              style={{
+                height: `${Math.max((h.value / max) * 100, 5)}%`,
+                background: cat.color,
+                opacity: hover == null || hover === i ? 1 : 0.35,
+              }}
+            />
+          );
+        })}
+        {hover != null && (
+          <div
+            className="pointer-events-none absolute bottom-full z-20 mb-1 -translate-x-1/2 whitespace-nowrap rounded border border-grid-strong bg-cream px-2 py-1 text-[11px] text-ink shadow-lg"
+            style={{ left: `${((hover + 0.5) / history.length) * 100}%` }}
+          >
+            {hourLabel(history[hover].time)} · {history[hover].value.toFixed(1)} µg/m³
+          </div>
+        )}
+      </div>
+      <div className="mt-0.5 flex justify-between text-[10px] text-ink-muted">
+        <span>{hourLabel(history[0].time)}</span>
+        <span>{hourLabel(history[history.length - 1].time)}</span>
       </div>
     </div>
   );
@@ -279,67 +551,134 @@ function headlineAqi(current, nowcast) {
   return { aqi, driver };
 }
 
-// AirNow parameter names → tidy display labels. Also used to line the measured
-// driver up with the modeled driver naming (ozone, not O3).
+// AirNow parameter names → tidy display labels (ozone spelled O₃, not O3).
 const MEASURED_LABELS = { 'PM2.5': 'PM2.5', O3: 'O₃', PM10: 'PM10' };
-const measuredDriverName = (d) => (d === 'O3' ? 'ozone' : d);
 
-/* ── MeasuredVsModeled: when a real AirNow reading exists near the search, the
-   headline IS that measurement; this shows its per-pollutant AQIs and, beside
-   them, what the CAMS model (what most apps show) says — so the gap is visible.
-   The particle makeup below stays modeled (AirNow gives AQI, not the mix). ── */
-function MeasuredVsModeled({ measured, modeled }) {
-  const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
-  return (
-    <div className="mb-3">
-      <p className="mb-1.5 text-[11px] leading-snug text-ink">
-        <span className="mr-1 rounded bg-ink px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream">
-          Measured
-        </span>
-        Real reading from the <strong>{measured.reportingArea}</strong> reporting area
-        {measured.distanceMi != null && <> ({measured.distanceMi} mi away)</>}, {measured.observedAt}
-        . The headline above is this monitor data — not a model.
-      </p>
-      <div className="mb-2 flex flex-wrap gap-1">
-        {keys.map((k) => {
-          const p = measured.parameters[k];
-          const isDriver = k === measured.driver;
-          const cat = aqiCategory(p.aqi);
-          return (
-            <span
-              key={k}
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
-                isDriver ? 'border-ink bg-ink font-semibold text-cream' : 'border-grid-strong text-ink'
-              }`}
-            >
-              {MEASURED_LABELS[k]}
-              <span
-                className="font-bold tabular-nums"
-                style={isDriver ? undefined : { color: cat.color }}
-              >
-                {p.aqi}
-              </span>
-            </span>
-          );
-        })}
-      </div>
-      <p className="text-[11px] leading-snug text-ink-muted">
-        {modeled?.aqi != null ? (
-          <>
-            For comparison, the <strong>CAMS model</strong> (what most phone apps interpolate) reads{' '}
-            <strong>{modeled.aqi}</strong>
-            {modeled.driver ? ` (${modeled.driver})` : ''} here — the particle makeup below is
-            modeled from it.
-          </>
-        ) : (
-          <>The particle makeup below is modeled (live model data is unavailable right now).</>
+/* ── ProvenanceSection: ONE source of truth for the headline number, in its own
+   titled section. The most accurate source wins and is the ONLY one shown, so
+   the reader is never handed two contradictory provenance lines:
+     • measured  → a real AirNow monitor reading (headline + per-pollutant chips)
+     • fallback  → nearest monitor's typical annual average (live data is down)
+     • scenario  → the preset's blurb
+     • modeled   → CAMS estimate + how far the nearest real monitor is (the gap)
+   The nearest-monitor "your number is a model stretched over that gap" line only
+   appears in the MODELED case — when a monitor reading exists it would be a lie. */
+function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor }) {
+  if (measured) {
+    const keys = ['PM2.5', 'O3', 'PM10'].filter((k) => measured.parameters[k]);
+    return (
+      <Section title="Where this number comes from">
+        <p className="text-[11px] leading-snug text-ink">
+          A <strong>real monitor reading</strong> from the <strong>{measured.reportingArea}</strong>{' '}
+          reporting area
+          {measured.distanceMi != null && <> ({measured.distanceMi} mi away)</>}, {measured.observedAt}
+          , published by <strong>AirNow (US EPA)</strong> — a monitor, not a model.
+        </p>
+        {keys.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {keys.map((k) => {
+              const p = measured.parameters[k];
+              const isDriver = k === measured.driver;
+              const cat = aqiCategory(p.aqi);
+              return (
+                <Tip key={k} text={POLLUTANT_BLURBS[k] ?? POLLUTANT_BLURBS[MEASURED_LABELS[k]]}>
+                  <span
+                    className={`inline-flex cursor-help items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                      isDriver
+                        ? 'border-ink bg-ink font-semibold text-cream'
+                        : 'border-grid-strong text-ink'
+                    }`}
+                  >
+                    {MEASURED_LABELS[k]}
+                    <span
+                      className="font-bold tabular-nums"
+                      style={isDriver ? undefined : { color: cat.color }}
+                    >
+                      {p.aqi}
+                    </span>
+                  </span>
+                </Tip>
+              );
+            })}
+          </div>
         )}
+      </Section>
+    );
+  }
+
+  if (result.fallback) {
+    return (
+      <Section title="Where this number comes from">
+        <p className="text-xs leading-relaxed text-ink">
+          <strong>Live data is unavailable right now.</strong> This is the{' '}
+          <strong>typical annual average</strong> PM2.5 from the nearest EPA monitor (
+          {result.fallback.distanceMi} mi away, 2024) — a stand-in for the usual air here, not
+          today’s reading.
+        </p>
+      </Section>
+    );
+  }
+
+  if (result.blurb) {
+    return (
+      <Section title="About this scenario">
+        <p className="text-xs leading-relaxed text-ink-muted">{result.blurb}</p>
+      </Section>
+    );
+  }
+
+  // Modeled: no monitor reading nearby.
+  return (
+    <Section title="Where this number comes from">
+      <p className="text-xs leading-relaxed text-ink-muted">
+        {modeled.driver && (
+          <>
+            Today’s driver: <strong>{modeled.driver}</strong>
+            {nowcast?.aqi != null &&
+              ` · NowCast PM2.5 ${nowcast.concentration.toFixed(1)} µg/m³ (12-hr weighted)`}
+            .{' '}
+          </>
+        )}
+        No monitor reading was available nearby, so this is a <strong>modeled estimate</strong>{' '}
+        (CAMS atmospheric model, ~11 km grid) — the same kind of interpolation most phone apps show.
       </p>
-    </div>
+      <SubIndexStrip current={current} driver={modeled.driver} nowcast={nowcast} />
+      {monitor && (
+        <p className="mt-2 rounded-lg border border-dashed border-grid-strong bg-cream/60 px-3 py-2 text-xs leading-relaxed text-ink">
+          The nearest regulatory PM2.5 monitor is <strong>{monitor.distanceMi} mi</strong> away —{' '}
+          {monitor.name} ({monitor.county} County, {monitor.state}). Your number is a model stretched
+          over that gap. Only ~1 in 5 US counties has one at all.
+        </p>
+      )}
+    </Section>
   );
 }
 
-function Readout({ result, view, mode, hidden, onToggle, source }) {
+/* ── ModelComparisonSection: the measured/model gap made explicit, in its own
+   titled section. Only shown when a real reading is the headline — it contrasts
+   that reading with what the CAMS model most apps use would have said here, and
+   carries the note that the particle makeup below is modeled from the CAMS air. */
+function ModelComparisonSection({ modeled, measuredAqi }) {
+  const delta = modeled.aqi - measuredAqi;
+  const rel =
+    delta > 4
+      ? `higher than the ${measuredAqi} measured above`
+      : delta < -4
+        ? `lower than the ${measuredAqi} measured above`
+        : `close to the ${measuredAqi} measured above`;
+  return (
+    <Section title="What most phone apps show">
+      <p className="text-[11px] leading-snug text-ink-muted">
+        Most phone apps interpolate the <strong>CAMS model</strong>, which reads{' '}
+        <strong>{modeled.aqi}</strong>
+        {modeled.driver ? ` (${modeled.driver})` : ''} here — {rel}. The particle makeup below is
+        modeled from that CAMS air.
+      </p>
+    </Section>
+  );
+}
+
+function Readout({ result, view, hidden, onToggle, source }) {
   const { location, current, nowcast, monitor } = result;
   const modeled = headlineAqi(current, nowcast);
   // A real AirNow reading, when one exists near the search, becomes the headline
@@ -348,6 +687,9 @@ function Readout({ result, view, mode, hidden, onToggle, source }) {
   const measured = result.measured?.available ? result.measured : null;
   const displayAqi = measured ? measured.aqi : modeled.aqi;
   const category = aqiCategory(displayAqi);
+  // The model comparison only makes sense against a live model AQI (not the
+  // typical-annual fallback).
+  const modelForCompare = result.fallback ? null : modeled;
 
   return (
     // The cap tracks the diagram beside it: the pollutant view stacks two ring
@@ -359,54 +701,48 @@ function Readout({ result, view, mode, hidden, onToggle, source }) {
         view === 'rings' ? 'max-h-[820px]' : 'max-h-[560px]'
       } overflow-y-auto rounded-lg border border-grid-strong bg-cream/60 p-5`}
     >
-      <h3 className="font-display text-2xl italic">{location.name}</h3>
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="font-display text-2xl italic">{location.name}</h3>
+        {/* Provenance settled BEFORE the number is read. */}
+        <ProvenanceBadge
+          measured={!!measured}
+          fallback={!!result.fallback}
+          scenario={!!result.blurb}
+        />
+      </div>
 
       <AqiMeter aqi={displayAqi} category={category} />
-      {measured ? (
-        <MeasuredVsModeled measured={measured} modeled={result.fallback ? null : modeled} />
-      ) : result.fallback ? (
-        <p className="mb-3 rounded-lg border border-dashed border-data-accent bg-data-accent/10 px-3 py-2 text-xs leading-relaxed text-ink">
-          <strong>Live data is unavailable right now.</strong> This is the{' '}
-          <strong>typical annual average</strong> PM2.5 from the nearest EPA monitor (
-          {result.fallback.distanceMi} mi away, 2024) — a stand-in for the usual air here, not
-          today’s reading.
-        </p>
-      ) : (
-        <p className="mb-2 text-xs leading-relaxed text-ink-muted">
-          {result.blurb ? (
-            result.blurb
-          ) : (
-            <>
-              {modeled.driver && (
-                <>
-                  Today’s driver: <strong>{modeled.driver}</strong>
-                  {nowcast?.aqi != null &&
-                    ` · NowCast PM2.5 ${nowcast.concentration.toFixed(1)} µg/m³ (12-hr weighted)`}
-                  .{' '}
-                </>
-              )}
-              This reading is a <strong>modeled estimate</strong> (CAMS atmospheric model, ~11 km
-              grid) — not a monitor reading.
-            </>
-          )}
-        </p>
-      )}
-      {!result.blurb && !result.fallback && !measured && (
-        <SubIndexStrip current={current} driver={modeled.driver} nowcast={nowcast} />
-      )}
-      {monitor && (
-        <p className="mb-4 rounded-lg border border-dashed border-grid-strong bg-cream/60 px-3 py-2 text-xs leading-relaxed text-ink">
-          Nearest regulatory PM2.5 monitor: <strong>{monitor.distanceMi} mi</strong> away —{' '}
-          {monitor.name} ({monitor.county} County, {monitor.state}). Your number is a model
-          stretched over that gap. Only ~1 in 5 US counties has one at all.
-        </p>
+
+      <GuidanceSection aqi={displayAqi} />
+
+      <TrendBars history={result.history} />
+
+      <ProvenanceSection
+        measured={measured}
+        modeled={modeled}
+        result={result}
+        current={current}
+        nowcast={nowcast}
+        monitor={monitor}
+      />
+
+      {measured && modelForCompare?.aqi != null && (
+        <ModelComparisonSection modeled={modelForCompare} measuredAqi={measured.aqi} />
       )}
 
-      {view === 'source' ? (
-        <SourceLegend current={current} mode={mode} hidden={hidden} onToggle={onToggle} source={source} />
-      ) : (
-        <PollutantList current={current} />
-      )}
+      <div className="mt-4 border-t border-grid-strong pt-4">
+        {view === 'source' ? (
+          <SourceLegend
+            current={current}
+            mode="legal"
+            hidden={hidden}
+            onToggle={onToggle}
+            source={source}
+          />
+        ) : (
+          <PollutantList current={current} />
+        )}
+      </div>
     </div>
   );
 }
@@ -519,20 +855,21 @@ function SubIndexStrip({ current, driver, nowcast }) {
           const isDriver = d.label === driver;
           const cat = aqiCategory(d.aqi);
           return (
-            <span
-              key={d.key}
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
-                isDriver ? 'border-ink bg-ink font-semibold text-cream' : 'border-grid-strong text-ink'
-              }`}
-            >
-              {d.label}
+            <Tip key={d.key} text={POLLUTANT_BLURBS[d.label]}>
               <span
-                className="font-bold tabular-nums"
-                style={isDriver ? undefined : { color: cat.color }}
+                className={`inline-flex cursor-help items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                  isDriver ? 'border-ink bg-ink font-semibold text-cream' : 'border-grid-strong text-ink'
+                }`}
               >
-                {d.aqi}
+                {d.label}
+                <span
+                  className="font-bold tabular-nums"
+                  style={isDriver ? undefined : { color: cat.color }}
+                >
+                  {d.aqi}
+                </span>
               </span>
-            </span>
+            </Tip>
           );
         })}
       </div>
@@ -662,34 +999,56 @@ function PollutantList({ current }) {
         which <em>models</em> what the PM2.5 particle mass is made of.
       </p>
       <p className="mb-2 text-xs text-ink-muted">
-        How many times over the health line (WHO) and the looser legal line (US) each pollutant
-        sits. A full bar means it’s at or past that line. The lines use different averaging periods
-        (annual, 24-hr, hourly) — read the bars as scale, not a compliance ruling.
+        Three bars per pollutant, on that pollutant’s own scale: <strong>today’s air</strong>,
+        then where the <strong>WHO health line</strong> and the looser <strong>US legal line</strong>{' '}
+        sit. When the top bar reaches past a line’s bar, the air is over that line. The lines use
+        different averaging periods (annual, 24-hr, hourly) — read them as scale, not a compliance
+        ruling.
       </p>
-      <ul className="grid gap-2.5">
+      <ul className="grid gap-3">
         {POLLUTANTS.map((def) => {
           const value = current[def.key];
           if (value == null) return null;
           // Same hex the ring diagram draws with — the dot, bars and ring all
           // cross-reference by colour.
           const hex = def.color;
+          // One shared scale INSIDE this card (reading + both lines), so the
+          // three bars compare honestly — but scales are not comparable across
+          // pollutants (CO lives in the thousands, SO₂ in the tens).
+          const top = Math.max(value, def.who, def.legal) * 1.05;
+          // Over-the-line highlight: a warm reddish wash when the reading passes
+          // a reference line. Over the (looser) US legal line reads stronger;
+          // over only the WHO health line is a fainter warning.
+          const overLegal = value > def.legal;
+          const overWho = value > def.who;
+          const cardTint = overLegal
+            ? 'border-[#D6392F]/50 bg-[#D6392F]/12'
+            : overWho
+              ? 'border-[#D6392F]/25 bg-[#D6392F]/[0.06]'
+              : 'border-grid-strong bg-cream/40';
           return (
-            <li key={def.key} className="text-sm">
+            <li key={def.key} className={`rounded-lg border p-3 text-sm ${cardTint}`}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: hex }} />
-                  <span className="truncate">
-                    <strong>{def.label}</strong>{' '}
-                    <span className="text-xs text-ink-muted">{def.name}</span>
+                <Tip text={def.blurb}>
+                  <span className="flex min-w-0 cursor-help items-center gap-1.5">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: hex }}
+                    />
+                    <span className="truncate">
+                      <strong>{def.label}</strong>{' '}
+                      <span className="text-xs text-ink-muted">{def.name}</span>
+                    </span>
                   </span>
-                </span>
+                </Tip>
                 <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-ink-muted">
                   {value} {def.unit}
                 </span>
               </div>
-              <div className="mt-1 grid gap-1">
-                <MiniLine label="WHO" ratio={value / def.who} color={hex} />
-                <MiniLine label="US legal" ratio={value / def.legal} color={hex} />
+              <div className="mt-2 grid gap-1">
+                <ScaleBar label="This air" value={value} top={top} color={hex} />
+                <ScaleBar label="WHO line" value={def.who} top={top} />
+                <ScaleBar label="US legal" value={def.legal} top={top} />
               </div>
             </li>
           );
@@ -699,19 +1058,33 @@ function PollutantList({ current }) {
   );
 }
 
-// A single "reading ÷ reference line" bar. Fills toward the line; a full bar
-// plus the multiple at right means the reading is at or past it. The bar keeps
-// the pollutant's own colour so it cross-references the ring diagram directly.
-function MiniLine({ label, ratio, color }) {
-  const pct = Math.min(ratio, 1) * 100;
-  const text = ratio >= 0.1 ? `${ratio.toFixed(1)}×` : '<0.1×';
+// Compact µg/m³ figure for the bar's right column (CO runs to 40,000).
+function fmtAmount(v) {
+  if (v >= 10000) return `${Math.round(v / 1000)}k`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  if (v >= 100) return `${Math.round(v)}`;
+  return `${v}`;
+}
+
+// One bar on the card's shared scale. The reading keeps the pollutant's own
+// colour (cross-referencing the ring diagram); the two reference lines are
+// neutral sand so the coloured bar reads as "the air" against "the rulers".
+function ScaleBar({ label, value, top, color }) {
+  const pct = Math.min(value / top, 1) * 100;
   return (
-    <div className="grid grid-cols-[3.5rem_1fr_2.2rem] items-center gap-1.5 text-[10px] leading-tight">
+    <div className="grid grid-cols-[3.6rem_1fr_2.6rem] items-center gap-1.5 text-[10px] leading-tight">
       <span className="uppercase tracking-wide text-ink-muted">{label}</span>
       <span className="block h-1.5 min-w-0 overflow-hidden rounded-full bg-grid-medium">
-        <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        <span
+          className="block h-full rounded-full"
+          style={{
+            width: `${pct}%`,
+            background: color ?? 'rgb(var(--sand-muted))',
+            opacity: color ? 1 : 0.7,
+          }}
+        />
       </span>
-      <span className="text-right font-semibold tabular-nums">{text}</span>
+      <span className="text-right font-semibold tabular-nums">{fmtAmount(value)}</span>
     </div>
   );
 }

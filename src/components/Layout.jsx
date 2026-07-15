@@ -33,12 +33,14 @@ export default function Layout({ children }) {
               ))}
             </nav>
           </div>
-          <NavLink
-            to="/"
+          <a
+            href={site.support.url}
+            target="_blank"
+            rel="noreferrer"
             className="label-caps rounded-full border border-grid-strong px-4 py-2 !text-ink transition-colors hover:!border-ink"
           >
-            Get your reading
-          </NavLink>
+            {site.support.label}
+          </a>
         </div>
       </header>
 

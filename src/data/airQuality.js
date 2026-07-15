@@ -2,6 +2,8 @@ import { POLLUTANTS } from '../lib/pollutants.js';
 import { nowcastAqi, pm25Aqi } from '../lib/nowcast.js';
 import { nearestMonitor, haversineMiles } from '../lib/monitors.js';
 import { nearestTypical } from '../lib/typical.js';
+import { fetchAirAlerts } from '../lib/nwsAlerts.js';
+import { apiUrl } from '../lib/apiBase.js';
 import { getScenario } from './scenarios.js';
 
 /**
@@ -110,6 +112,24 @@ function recentHourly(hourly, key, endTime, count = 12) {
   return out; // most-recent-first
 }
 
+// Same window but keeping the timestamps, oldest-first — feeds the little
+// "last 24 hours" trend bars under the AQI gauge.
+function recentSeries(hourly, key, endTime, count = 24) {
+  const times = hourly?.time ?? [];
+  const series = hourly?.[key] ?? [];
+  let end = times.length - 1;
+  if (endTime) {
+    const target = endTime.slice(0, 13);
+    const found = times.findIndex((t) => t.slice(0, 13) === target);
+    if (found !== -1) end = found;
+  }
+  const out = [];
+  for (let i = Math.max(0, end - count + 1); i <= end; i++) {
+    if (series[i] != null) out.push({ time: times[i], value: series[i] });
+  }
+  return out;
+}
+
 export async function fetchAirQuality(latitude, longitude) {
   const url = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
   url.searchParams.set('latitude', latitude);
@@ -130,13 +150,16 @@ export async function fetchAirQuality(latitude, longitude) {
   url.searchParams.set('hourly', 'pm2_5');
   url.searchParams.set('past_days', '1');
   url.searchParams.set('forecast_days', '1');
+  // Local timestamps for the place (not GMT) — the trend bars label hours.
+  url.searchParams.set('timezone', 'auto');
   const { ok, data } = await fetchJson(url, { label: 'Air quality lookup' });
   if (!ok || !data) throw new Error('Air quality lookup failed — try again.');
 
   const hourlyPm25 = recentHourly(data.hourly, 'pm2_5', data.current?.time, 12);
   const nowcast = nowcastAqi(hourlyPm25);
+  const history = recentSeries(data.hourly, 'pm2_5', data.current?.time, 24);
 
-  return { current: data.current, nowcast };
+  return { current: data.current, nowcast, history };
 }
 
 // The REAL measured reading, via our own serverless proxy (/api/airnow holds
@@ -147,7 +170,7 @@ export async function fetchAirQuality(latitude, longitude) {
 async function fetchMeasured(latitude, longitude) {
   try {
     const { ok, data } = await fetchJson(
-      `/api/airnow?lat=${latitude}&lon=${longitude}`,
+      apiUrl(`/api/airnow?lat=${latitude}&lon=${longitude}`),
       { label: 'Measured', retries: 0 }
     );
     if (!ok || !data?.available) return null;
@@ -174,15 +197,20 @@ export async function getByQuery(query) {
   // block the result — each resolves to null on failure.
   const monitorP = nearestMonitor(latitude, longitude);
   const measuredP = fetchMeasured(latitude, longitude);
+  // Any active NWS air-quality alert for this point (Air Quality Alert, smoke,
+  // dust, ozone…). Garnish like the other two: null on failure, never blocks.
+  const alertsP = fetchAirAlerts(latitude, longitude);
 
   try {
-    const { current, nowcast } = await fetchAirQuality(latitude, longitude);
+    const { current, nowcast, history } = await fetchAirQuality(latitude, longitude);
     return {
       location,
       current,
       nowcast,
+      history,
       monitor: await monitorP,
       measured: await measuredP,
+      alert: await alertsP,
     };
   } catch (liveErr) {
     // The live CAMS model API is a single point of failure. Rather than blank
@@ -201,6 +229,7 @@ export async function getByQuery(query) {
       nowcast: null,
       monitor: await monitorP,
       measured,
+      alert: await alertsP,
       fallback: typical ? { kind: 'typical-annual', distanceMi: typical.distanceMi } : null,
     };
   }

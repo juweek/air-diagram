@@ -46,10 +46,11 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 // Camera state lives at module level so orbit/zoom survive the React remounts
 // that happen on every toggle (P5Sketch remounts whenever `data` changes).
 const cam = { yaw: -0.35, pitch: 0.12, zoom: 1 };
-// minZoom is tied to the field size below: at 0.7× the volume's half-width
-// (0.7 × canvas) still projects past the frame edge, so zooming all the way
-// out never reveals empty space around the simulation.
-const CAM = { minZoom: 0.7, maxZoom: 3, maxPitch: 1.25, idleSpin: 0.0012 };
+// minZoom now deliberately pulls PAST the volume edge: fully zoomed out you see
+// the whole cloud floating as one round patch of air — the cylinder footprint
+// (see buildSource) is what makes that pulled-back view read as a circular
+// area on the floor instead of a box.
+const CAM = { minZoom: 0.42, maxZoom: 3, maxPitch: 1.25, idleSpin: 0.0012 };
 
 // One soft radial-gradient sprite per colour, pre-rendered once on a raw canvas.
 // Deliberately dim: with additive compositing, clustered orbs sum toward light,
@@ -74,32 +75,40 @@ function glowSprite(color) {
   return c;
 }
 
-// A luminous speck drifting in the 3D volume. Brownian drift per axis; wraps
-// at the walls so the field reads as continuous while you travel through it.
+// A luminous speck drifting in the 3D volume. Brownian drift per axis. The
+// volume is a CYLINDER — a circular patch of air standing on the floor plane
+// (x/z = floor, y = height) — so the pulled-back view reads as a round area,
+// not a box. Wraps: leaving the wall re-enters at the opposite side (at the
+// antipode the same velocity points back inward), height wraps top↔bottom.
 class Speck3D {
   constructor(color, radius, field) {
     this.color = color;
     this.radius = radius;
     this.field = field;
-    this.x = (Math.random() * 2 - 1) * field.rx;
+    // sqrt() for uniform density over the disc footprint.
+    const a = Math.random() * Math.PI * 2;
+    const rr = Math.sqrt(Math.random()) * field.r;
+    this.x = Math.cos(a) * rr;
+    this.z = Math.sin(a) * rr;
     this.y = (Math.random() * 2 - 1) * field.ry;
-    this.z = (Math.random() * 2 - 1) * field.rz;
     this.vx = (Math.random() * 2 - 1) * 0.6;
     this.vy = (Math.random() * 2 - 1) * 0.6;
     this.vz = (Math.random() * 2 - 1) * 0.4;
   }
 
   move(agit) {
-    const { rx, ry, rz } = this.field;
+    const { r, ry } = this.field;
     this.x += this.vx * agit + (Math.random() - 0.5) * 0.4;
     this.y += this.vy * agit + (Math.random() - 0.5) * 0.4;
     this.z += this.vz * agit;
-    if (this.x > rx) this.x -= rx * 2;
-    else if (this.x < -rx) this.x += rx * 2;
     if (this.y > ry) this.y -= ry * 2;
     else if (this.y < -ry) this.y += ry * 2;
-    if (this.z > rz) this.z -= rz * 2;
-    else if (this.z < -rz) this.z += rz * 2;
+    const d2 = this.x * this.x + this.z * this.z;
+    if (d2 > r * r) {
+      const k = -(r * 0.99) / Math.sqrt(d2); // antipode, just inside the wall
+      this.x *= k;
+      this.z *= k;
+    }
   }
 }
 
@@ -144,6 +153,10 @@ export function airParticleSketch(p, data) {
   let agitation = 1;
   let ground = GROUND_FALLBACK;
   let activePointers = null; // Map of live pointers (source view; pauses idle spin)
+  // Our own pointer tracker for the ring views. p5 2.x's mouseX/mouseY doesn't
+  // update reliably here, so the hover hit-test reads this instead — a plain
+  // pointermove listener on the canvas (removed with the canvas on unmount).
+  const mouse = { x: -1, y: -1 };
 
   // Size to the P5Sketch mount node (which p5 sets as the canvas parent).
   const hostWidth = () => Math.min(p.canvas?.parentElement?.clientWidth || CANVAS_MAX, CANVAS_MAX);
@@ -291,11 +304,11 @@ export function airParticleSketch(p, data) {
     specks = [];
     agitation = clamp(p.map(c.us_aqi ?? 0, 0, 300, 0.5, 2.5), 0.5, 2.5);
 
-    // The volume, sized to the canvas but deliberately OVERSIZED (the canvas
-    // frames a window into it): even fully zoomed out (CAM.minZoom) the box
-    // still overfills the frame, so you always feel inside the simulation.
-    // z stays shallower than x/y so it reads as a cloud, not a tunnel.
-    field = { rx: p.width * 0.7, ry: p.width * 0.65, rz: p.width * 0.45 };
+    // The volume: a cylinder sized to the canvas — footprint radius r on the
+    // floor plane, half-height ry. At default zoom the canvas frames a window
+    // into it (you feel inside the air); at full zoom-out the whole cloud fits
+    // in frame and reads as a circular patch of air, not a box.
+    field = { r: p.width * 0.7, ry: p.width * 0.55 };
 
     const breakdown = particleBreakdown(c, mode);
 
@@ -361,7 +374,9 @@ export function airParticleSketch(p, data) {
       const scale = f / denom;
       const px = halfW + x1 * cam.zoom * scale;
       const py = halfH + y1 * cam.zoom * scale;
-      const d = s.radius * 5 * scale;
+      // 4.2 (was 5): slightly smaller orbs — the point is that even "bad" air
+      // is mostly empty space, so let the darkness between specks show.
+      const d = s.radius * 4.2 * scale;
       if (px + d < 0 || px - d > p.width || py + d < 0 || py - d > p.height) continue;
 
       // Nearer = brighter; fade out approaching the near cull so orbs never pop.
@@ -438,10 +453,9 @@ export function airParticleSketch(p, data) {
   // canvas centre, so the test is just |mouse distance − ring radius| within
   // the ring's particle band.
   function hoveredRing() {
-    const mx = p.mouseX;
-    const my = p.mouseY;
-    // p5 reports (0,0) until the pointer first moves over the canvas.
-    if ((mx === 0 && my === 0) || mx < 0 || mx > p.width || my < 0 || my > p.height) return null;
+    const mx = mouse.x;
+    const my = mouse.y;
+    if (mx < 0 || mx > p.width || my < 0 || my > p.height) return null;
     const d = Math.hypot(mx - p.width / 2, my - p.height / 2);
     let best = null;
     let bestErr = Infinity;
@@ -469,8 +483,8 @@ export function airParticleSketch(p, data) {
     const w = p.textWidth(ring.label) + dotSpan + pad * 2;
     const h = size + pad * 1.6;
     // Beside the cursor, clamped inside the canvas.
-    const x = Math.min(Math.max(p.mouseX + 14, 4), p.width - w - 4);
-    const y = Math.min(Math.max(p.mouseY - h - 10, 4), p.height - h - 4);
+    const x = Math.min(Math.max(mouse.x + 14, 4), p.width - w - 4);
+    const y = Math.min(Math.max(mouse.y - h - 10, 4), p.height - h - 4);
     p.stroke(74, 68, 60); // --hairline-strong
     p.strokeWeight(1);
     p.fill(31, 28, 25, 235); // --ground, near-opaque
@@ -495,6 +509,27 @@ export function airParticleSketch(p, data) {
     p.resizeCanvas(size, size);
     build();
     if (is3D) initCameraControls();
+    else {
+      // Ring/baseline views: track the pointer for the hover hit-test, and
+      // force a synchronous redraw on each move. Redrawing on the event (rather
+      // than waiting for the next draw frame) makes the hover isolate instant
+      // AND keeps it working even when the rAF loop is throttled (e.g. a
+      // backgrounded tab, or this preview harness).
+      const cv = p.canvas;
+      cv.addEventListener('pointermove', (e) => {
+        const r = cv.getBoundingClientRect();
+        // Canvas pixels == CSS pixels (pixelDensity(1), no CSS scaling beyond
+        // max-width:100%, which rect.width accounts for).
+        mouse.x = ((e.clientX - r.left) / r.width) * p.width;
+        mouse.y = ((e.clientY - r.top) / r.height) * p.height;
+        p.redraw();
+      });
+      cv.addEventListener('pointerleave', () => {
+        mouse.x = -1;
+        mouse.y = -1;
+        p.redraw();
+      });
+    }
   };
 
   p.windowResized = () => {
@@ -517,10 +552,17 @@ export function airParticleSketch(p, data) {
       drawSource3D();
     } else {
       p.background(ground[0], ground[1], ground[2]);
-      // Crisp rings: outer layers first so the dense centre draws on top.
-      for (let i = organics.length - 1; i >= 0; i--) organics[i].show(change);
-      change += pulseSpeed;
+      // Hover isolates a ring: every OTHER ring's particles drop to low alpha
+      // so the hovered pollutant reads as its own layer, not part of a blur.
       const hovered = hoveredRing();
+      const ctx = p.drawingContext;
+      // Crisp rings: outer layers first so the dense centre draws on top.
+      for (let i = organics.length - 1; i >= 0; i--) {
+        ctx.globalAlpha = hovered && organics[i] !== hovered ? 0.14 : 1;
+        organics[i].show(change);
+      }
+      ctx.globalAlpha = 1;
+      change += pulseSpeed;
       p.canvas.style.cursor = hovered ? 'crosshair' : 'default';
       if (hovered) drawRingTooltip(hovered);
     }

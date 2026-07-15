@@ -20,6 +20,13 @@ const site = {
     { path: '/map', label: 'The monitor gap' },
   ],
 
+  // Header CTA — the tool stays free and ad-free; the "ad" it runs is our own.
+  // ⚠ OWNER: confirm/replace this URL (Substack subscribe page or donation link).
+  support: {
+    label: 'Support the author',
+    url: 'https://gourmetdata.substack.com/subscribe',
+  },
+
   // Attribution is required on every page.
   attribution: {
     sourceName: 'Open-Meteo Air Quality API (CAMS model)',

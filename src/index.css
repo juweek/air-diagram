@@ -91,28 +91,8 @@
     color: rgb(var(--sand-muted));
   }
 
-  /* The glitch texture: a vertical-bar field bleeding from the top edge and
-     fading into the ground — the Style-2 "1c" hero treatment. Pure CSS, so it
-     costs nothing to animate-free render. Bars are an unevenly striped
-     repeating gradient; the mask fades them out toward the bottom. */
-  .glitch-texture {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-image: repeating-linear-gradient(
-      90deg,
-      rgb(var(--sand) / 0.14) 0px,
-      rgb(var(--sand) / 0.14) 1px,
-      transparent 1px,
-      transparent 4px,
-      rgb(var(--sand) / 0.07) 4px,
-      rgb(var(--sand) / 0.07) 5px,
-      transparent 5px,
-      transparent 11px
-    );
-    -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 78%);
-    mask-image: linear-gradient(180deg, #000 0%, transparent 78%);
-  }
+  /* (The old .glitch-texture hero treatment was replaced by the HeroBars SVG
+     in AirPage.jsx — a bar-chart skyline whose tops fade into the charcoal.) */
 }
 
 /* ── gourmetMediaContainer — dark editorial skin ─────────────────────────────

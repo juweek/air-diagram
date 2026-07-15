@@ -4,7 +4,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import GourmetMediaContainer from '../components/GourmetMediaContainer';
 import monitors from '../data/pm25Monitors.json';
 import usStates from '../data/usStates.json';
-import { buildCoverageGrid, COVERAGE_BANDS } from '../lib/coverage';
+import { buildCoverageGrid, COVERAGE_BANDS, COVERAGE_GAP, pointInUS } from '../lib/coverage';
+import { apiUrl } from '../lib/apiBase';
 
 /**
  * THE MONITOR-GAP MAP — the compiled counter-dataset, drawn, in three modes:
@@ -23,10 +24,14 @@ import { buildCoverageGrid, COVERAGE_BANDS } from '../lib/coverage';
  * bundle. Alaska/Hawaii are omitted from this view; the caption keeps counts honest.
  */
 
-const CREAM = '#F7F0EF';
-const INK = '#383838';
-const GRID_STRONG = '#CDCDCD';
-const DATA_PRIMARY = '#3266AD';
+// Charcoal-theme map colours (mirror the design tokens in index.css). The map is
+// a fixed rectangle, so it uses flat token values rather than the page gradient.
+const GROUND = '#1f1c19'; // --ground: the charcoal map floor, matches the page
+const LAND = '#d9cdb8'; // --sand: a faint warm landmass, drawn at low opacity
+const BORDER = '#a8987e'; // --sand-muted: state outlines
+const HALO = '#f6efe0'; // --sand-bright: a light ring around each dot so it pops
+const INK = '#383838'; // dark text for the (light) hover popups
+const DATA_PRIMARY = '#6FA6FF'; // luminous blue monitor dots on the dark ground
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
 // AQI categories (AirNow Category number → label + color; matches pollutants.js).
@@ -82,7 +87,7 @@ export default function MonitorMap() {
     if (!containerRef.current) return undefined;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': CREAM } }] },
+      style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': GROUND } }] },
       center: [-96, 38],
       zoom: 3.2,
       minZoom: 2.5,
@@ -102,17 +107,18 @@ export default function MonitorMap() {
       map.addSource('monitors', { type: 'geojson', data: points });
       map.addSource('status', { type: 'geojson', data: EMPTY });
 
-      map.addLayer({ id: 'states-fill', type: 'fill', source: 'states', paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.45 } });
-      // Coverage sits above land fill but below borders + dots.
-      map.addLayer({ id: 'coverage', type: 'fill', source: 'coverage', layout: { visibility: 'none' }, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 } });
-      map.addLayer({ id: 'states-line', type: 'line', source: 'states', paint: { 'line-color': GRID_STRONG, 'line-width': 0.8 } });
+      map.addLayer({ id: 'states-fill', type: 'fill', source: 'states', paint: { 'fill-color': LAND, 'fill-opacity': 0.12 } });
+      // Coverage sits above land fill but below borders + dots. Opacity is
+      // per-feature so the deep-red gaps read stronger than the covered bands.
+      map.addLayer({ id: 'coverage', type: 'fill', source: 'coverage', layout: { visibility: 'none' }, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.65 } });
+      map.addLayer({ id: 'states-line', type: 'line', source: 'states', paint: { 'line-color': BORDER, 'line-width': 0.7, 'line-opacity': 0.35 } });
 
       const radius = ['interpolate', ['linear'], ['zoom'], 3, 2, 5, 3.5, 8, 7];
       map.addLayer({
         id: 'monitors',
         type: 'circle',
         source: 'monitors',
-        paint: { 'circle-color': DATA_PRIMARY, 'circle-opacity': 0.85, 'circle-stroke-color': CREAM, 'circle-stroke-width': 0.6, 'circle-radius': radius },
+        paint: { 'circle-color': DATA_PRIMARY, 'circle-opacity': 0.9, 'circle-stroke-color': HALO, 'circle-stroke-width': 0.6, 'circle-radius': radius },
       });
       map.addLayer({
         id: 'status',
@@ -121,9 +127,9 @@ export default function MonitorMap() {
         layout: { visibility: 'none' },
         paint: {
           'circle-color': ['match', ['get', 'cat'], 1, CAT_BY_N[1].color, 2, CAT_BY_N[2].color, 3, CAT_BY_N[3].color, 4, CAT_BY_N[4].color, 5, CAT_BY_N[5].color, 6, CAT_BY_N[6].color, '#999999'],
-          'circle-opacity': 0.9,
-          'circle-stroke-color': INK,
-          'circle-stroke-width': 0.4,
+          'circle-opacity': 0.95,
+          'circle-stroke-color': HALO,
+          'circle-stroke-width': 0.5,
           'circle-radius': radius,
         },
       });
@@ -166,15 +172,17 @@ export default function MonitorMap() {
     vis('status', mode === 'status');
   }, [mode, ready]);
 
-  // ── Live AQI: fetch statuses the first time that mode is opened ──────────────
+  // ── Live AQI: PREFETCH on mount (not on tab-open) so opening the tab shows
+  // coloured dots immediately, with no awkward gap while the fetch lands.
+  // Sites are filtered to US points — AirNow's border BBOX returns some
+  // Canadian/Mexican monitors we don't want on a US map. ──────────────────────
   useEffect(() => {
-    if (mode !== 'status' || statusGeo) return undefined;
     let cancelled = false;
-    fetch('/api/monitor-status')
-      .then((r) => r.json())
+    fetch(apiUrl('/api/monitor-status'))
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
       .then((j) => {
         if (cancelled) return;
-        const sites = j.sites ?? [];
+        const sites = (j.sites ?? []).filter(([lat, lon]) => pointInUS(lon, lat));
         setStatusGeo({
           type: 'FeatureCollection',
           features: sites.map(([lat, lon, aqi, cat]) => ({
@@ -196,11 +204,14 @@ export default function MonitorMap() {
     return () => {
       cancelled = true;
     };
-  }, [mode, statusGeo]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map && ready && statusGeo) map.getSource('status')?.setData(statusGeo);
+    if (map && ready && statusGeo) {
+      map.getSource('status')?.setData(statusGeo);
+      map.triggerRepaint(); // ensure the new dots paint even if the map is idle
+    }
   }, [statusGeo, ready]);
 
   // ── Coverage: compute the grid the first time that mode is opened ────────────
@@ -213,7 +224,10 @@ export default function MonitorMap() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map && ready && coverageGeo) map.getSource('coverage')?.setData(coverageGeo);
+    if (map && ready && coverageGeo) {
+      map.getSource('coverage')?.setData(coverageGeo);
+      map.triggerRepaint();
+    }
   }, [coverageGeo, ready]);
 
   // ── category filter (Live AQI) ──────────────────────────────────────────────
@@ -232,6 +246,9 @@ export default function MonitorMap() {
     });
 
   const pct = Math.round((648 / 3144) * 100);
+  // Live-AQI dots are prefetched on mount; show a loading veil only if the tab
+  // is open before that fetch has landed (and it isn't an outright failure).
+  const statusLoading = mode === 'status' && !statusGeo && !statusMeta?.error;
 
   return (
     <div>
@@ -247,12 +264,15 @@ export default function MonitorMap() {
         source={SOURCE}
       >
         <div className="w-full">
-          <div
-            ref={containerRef}
-            className="h-[560px] w-full overflow-hidden rounded-lg border border-grid-strong bg-cream"
-            role="img"
-            aria-label={`Map of ${shownCount} regulatory PM2.5 monitors across the contiguous United States`}
-          />
+          <div className="relative">
+            <div
+              ref={containerRef}
+              className="h-[560px] w-full overflow-hidden rounded-lg border border-grid-strong bg-cream"
+              role="img"
+              aria-label={`Map of ${shownCount} regulatory PM2.5 monitors across the contiguous United States`}
+            />
+            {statusLoading && <MapLoadingVeil label="Loading live monitor readings…" />}
+          </div>
 
           {mode === 'status' ? (
             <StatusLegend hidden={hidden} onToggle={toggleCat} meta={statusMeta} />
@@ -269,6 +289,21 @@ export default function MonitorMap() {
           )}
         </div>
       </GourmetMediaContainer>
+    </div>
+  );
+}
+
+/* ── MapLoadingVeil: a translucent overlay + spinner shown over the map while
+   the live-AQI readings are still loading, so the tab never flashes an empty
+   (uncoloured) map. Absolutely positioned inside the map's relative wrapper. ── */
+function MapLoadingVeil({ label }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-lg bg-ground-lift/70 backdrop-blur-[1px]">
+      <span
+        className="h-7 w-7 animate-spin rounded-full border-2 border-grid-strong border-t-ink-bright"
+        aria-hidden
+      />
+      <span className="label-caps !text-ink-bright">{label}</span>
     </div>
   );
 }
@@ -350,25 +385,22 @@ function CoverageLegend({ ready }) {
       <p className="mb-1.5 text-sm text-ink-muted">
         {ready ? (
           <>
-            Land shaded by distance to the <strong className="text-ink">nearest</strong> monitor.
-            Blank areas are <strong className="text-ink">more than 150 miles</strong> from one —
-            those are the gaps your AQI is interpolated across.
+            Land shaded by distance to the <strong className="text-ink">nearest</strong> monitor. The
+            <strong className="text-ink"> deep-red</strong> land is{' '}
+            <strong className="text-ink">more than 150 miles</strong> from one — those are the gaps
+            your AQI is interpolated across.
           </>
         ) : (
           <>Computing coverage…</>
         )}
       </p>
       <div className="flex flex-wrap gap-3">
-        {COVERAGE_BANDS.map((b) => (
-          <span key={b.max} className="inline-flex items-center gap-1.5 text-xs text-ink">
-            <span className="h-3 w-3 rounded-sm" style={{ background: b.color, opacity: 0.7 }} />
+        {[...COVERAGE_BANDS, COVERAGE_GAP].map((b) => (
+          <span key={b.label} className="inline-flex items-center gap-1.5 text-xs text-ink">
+            <span className="h-3 w-3 rounded-sm" style={{ background: b.color, opacity: 0.85 }} />
             {b.label}
           </span>
         ))}
-        <span className="inline-flex items-center gap-1.5 text-xs text-ink">
-          <span className="h-3 w-3 rounded-sm border border-grid-strong bg-cream" />
-          &gt; 150 mi — uncovered (gap)
-        </span>
       </div>
     </div>
   );

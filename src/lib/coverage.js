@@ -10,14 +10,20 @@
 import monitors from '../data/pm25Monitors.json';
 import usStates from '../data/usStates.json';
 
-// Distance bands in miles → fill color. Beyond the last band = uncovered (gap),
-// no cell emitted.
+// Distance bands in miles → fill color. Beyond the last band = uncovered (gap).
 export const COVERAGE_BANDS = [
   { max: 30, color: '#3B9C46', label: '≤ 30 mi — well covered' },
   { max: 75, color: '#C7A70A', label: '30–75 mi — marginal' },
   { max: 150, color: '#E07C00', label: '75–150 mi — poor' },
 ];
-const MAX_MI = COVERAGE_BANDS[COVERAGE_BANDS.length - 1].max;
+
+// Beyond the last band the land used to be left BLANK (holes showing through the
+// cream map). On the charcoal map a blank hole just reads as background, so we
+// paint the gap a bold deep red instead — among the muted green/amber covered
+// bands, the red uncovered land becomes the loudest thing on the map.
+// (Emphasis lives in the COLOUR, not per-feature opacity: MapLibre's fill-opacity
+// is not data-driven, so a single constant opacity applies to the whole layer.)
+export const COVERAGE_GAP = { color: '#C42B1F', label: '> 150 mi — uncovered (gap)' };
 
 // ── point-in-polygon (ray casting), with per-feature bbox prefilter ──────────
 function ringContains(x, y, ring) {
@@ -62,6 +68,13 @@ function onLand(x, y) {
   return false;
 }
 
+// Is a lon/lat point inside a US state polygon? Reuses the same land polygons as
+// the coverage grid. Used to drop AirNow monitors that sit just over the border
+// (its BBOX pull includes some Canadian/Mexican sites) so the map is US-only.
+export function pointInUS(lon, lat) {
+  return onLand(lon, lat);
+}
+
 // [lat, lon] for every monitor (rows are [lat, lon, name, county, state]).
 const MON = monitors.map((m) => [m[0], m[1]]);
 
@@ -83,11 +96,13 @@ export function buildCoverageGrid(cell = 0.5) {
         if (d2 < best) best = d2;
       }
       const dist = Math.sqrt(best);
-      if (dist > MAX_MI) continue; // gap → no cell, hole shows through
       const band = COVERAGE_BANDS.find((b) => dist <= b.max);
+      // On-land cells always emit now — covered land takes its band colour, the
+      // uncovered gap takes deep red. The holes become the point.
+      const color = band ? band.color : COVERAGE_GAP.color;
       features.push({
         type: 'Feature',
-        properties: { color: band.color },
+        properties: { color },
         geometry: {
           type: 'Polygon',
           coordinates: [

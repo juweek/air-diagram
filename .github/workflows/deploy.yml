@@ -1,0 +1,76 @@
+name: Deploy to GitHub Pages
+
+# Builds the Vite site and publishes dist/ to GitHub Pages on every push to main.
+#
+# One-time setup in the repo: Settings → Pages → Build and deployment →
+# Source: "GitHub Actions".
+#
+# The site is served from https://<user>.github.io/<repo>/, so the build is told
+# its base path via VITE_BASE (derived from the repo name below). If you later
+# use a custom domain served at the root, set VITE_BASE to "/" instead.
+#
+# OPTIONAL — live AirNow features (the "Measured" headline + the Live-AQI map
+# layer) need the serverless functions in /api, which GitHub Pages can't run.
+# To keep them working, deploy those functions somewhere that can (e.g. Vercel)
+# and set a repository variable VITE_API_BASE to that origin
+# (Settings → Secrets and variables → Actions → Variables). Leave it unset and
+# those two features simply degrade — everything else runs on the free, key-less,
+# CORS-open APIs.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two Pages deploys at once; let a newer push cancel an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+
+      # SPA routing: GitHub Pages has no rewrite rule, so a deep link like
+      # /<repo>/Detroit 404s. Serving index.html as 404.html lets the app boot
+      # and the router resolve the path client-side.
+      - name: SPA 404 fallback
+        run: cp dist/index.html dist/404.html
+
+      # Stop Pages' Jekyll step from ignoring any _-prefixed asset files.
+      - name: Disable Jekyll
+        run: touch dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

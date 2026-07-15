@@ -25,6 +25,8 @@ export const POLLUTANTS = [
     legal: 9, // EPA annual NAAQS (2024; was 12)
     color: '#E6D3A0',
     centered: true,
+    blurb:
+      'Fine particles under 2.5 microns — small enough to lodge deep in the lungs and cross into the blood. Mostly combustion: traffic, smoke, industry.',
   },
   {
     key: 'pm10',
@@ -36,6 +38,8 @@ export const POLLUTANTS = [
     legal: 150, // EPA 24-hour NAAQS
     color: '#D9A93E',
     semiCentered: true,
+    blurb:
+      'Coarse particles under 10 microns — road grit, construction dust, pollen. Irritates eyes and airways but mostly stops in the nose and throat.',
   },
   {
     key: 'ozone',
@@ -46,6 +50,8 @@ export const POLLUTANTS = [
     who: 100, // WHO 8-hour
     legal: 137, // EPA 8-hour NAAQS (0.070 ppm ≈ 137 µg/m³)
     color: '#6FA6FF',
+    blurb:
+      'Ground-level ozone — formed when sunlight cooks traffic and industrial gases. A lung irritant that peaks on hot, still afternoons. N95 masks don’t filter it.',
   },
   {
     key: 'nitrogen_dioxide',
@@ -56,6 +62,8 @@ export const POLLUTANTS = [
     who: 25, // WHO 24-hour
     legal: 188, // EPA 1-hour NAAQS (100 ppb ≈ 188 µg/m³)
     color: '#F0665F',
+    blurb:
+      'Nitrogen dioxide — the signature gas of tailpipes and gas stoves. Inflames airways; a good tracer of fresh traffic exhaust near you.',
   },
   {
     key: 'sulphur_dioxide',
@@ -66,6 +74,8 @@ export const POLLUTANTS = [
     who: 40, // WHO 24-hour
     legal: 196, // EPA 1-hour NAAQS (75 ppb ≈ 196 µg/m³)
     color: '#5FD08A',
+    blurb:
+      'Sulfur dioxide — from burning coal and oil. Irritating on its own, and the gas that later becomes sulfate haze particles downwind.',
   },
   {
     key: 'carbon_monoxide',
@@ -76,6 +86,8 @@ export const POLLUTANTS = [
     who: 4000, // WHO 24-hour (4 mg/m³)
     legal: 40000, // EPA 1-hour NAAQS (35 ppm ≈ 40 mg/m³)
     color: '#E68AC9',
+    blurb:
+      'Carbon monoxide — an odorless combustion gas that binds to blood in place of oxygen. High indoors near flames; usually low outdoors.',
   },
   {
     key: 'dust',
@@ -86,8 +98,17 @@ export const POLLUTANTS = [
     who: 45, // no dust-specific guideline; borrow PM10 24-hour
     legal: 150,
     color: '#D98A44',
+    blurb:
+      'Wind-blown mineral dust — desert plumes, dry fields, unpaved roads. A natural source, but still particulate load on the lungs.',
   },
 ];
+
+// Quick lookup for tooltips on chips that key by display label ("PM2.5", "O3"…).
+export const POLLUTANT_BLURBS = Object.fromEntries(
+  POLLUTANTS.map((d) => [d.label, d.blurb])
+);
+POLLUTANT_BLURBS['O3'] = POLLUTANT_BLURBS['O₃']; // AirNow spells it without the subscript
+POLLUTANT_BLURBS['ozone'] = POLLUTANT_BLURBS['O₃']; // the AQI-driver strip uses the word
 
 // The headline pollutant's two lines, pulled out so the source view and the
 // legend don't have to dig through POLLUTANTS.
@@ -109,6 +130,39 @@ export function exceedance(def, value, mode = 'legal') {
   const line = mode === 'who' ? def.who : def.legal;
   if (!line || value == null) return 0;
   return Math.max(0, value / line);
+}
+
+// What to actually DO at a given AQI — compressed from the EPA/AirNow activity
+// guidance ("Air Quality Activity Guides" + "When Smoke is in the Air"). Static
+// public-health advice keyed to the same category breakpoints as aqiCategory();
+// the UI links to AirNow so the reader can see the full guidance.
+const AQI_GUIDANCE = [
+  { max: 50, text: 'No precautions needed — a good day to be outside.' },
+  {
+    max: 100,
+    text: 'Fine for almost everyone. Unusually sensitive people should consider shortening long, intense outdoor exertion.',
+  },
+  {
+    max: 150,
+    text: 'Sensitive groups (asthma, heart or lung disease, kids, older adults): go easier and shorter outdoors. If it’s smoke, an N95 helps outside — cloth and surgical masks don’t.',
+  },
+  {
+    max: 200,
+    text: 'Everyone: cut back prolonged outdoor exertion; sensitive groups move activity indoors. Close windows and filter indoor air. In smoke, wear an N95 outside (no mask filters ozone).',
+  },
+  {
+    max: 300,
+    text: 'Avoid outdoor exertion entirely. Stay indoors with windows closed and filtered air; wear an N95 if you must go out.',
+  },
+  {
+    max: Infinity,
+    text: 'Health-emergency air. Everyone stay indoors with filtered air and avoid all outdoor exposure until it clears.',
+  },
+];
+
+export function aqiGuidance(aqi) {
+  if (aqi == null) return null;
+  return AQI_GUIDANCE.find((g) => aqi <= g.max)?.text ?? null;
 }
 
 // US EPA AQI categories with their standard colors.

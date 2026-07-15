@@ -11,6 +11,7 @@ export default function LookupInput({
   defaultValue = '',
   placeholder = 'a ZIP code or city — e.g. 48226 or Detroit',
   buttonLabel = 'Look up',
+  large = false, // landing-hero treatment: bigger type, labelled submit
 }) {
   const [value, setValue] = useState(defaultValue);
 
@@ -22,22 +23,29 @@ export default function LookupInput({
   }
 
   return (
-    <form onSubmit={handleSubmit} autoComplete="off" className="max-w-md">
-      <div className="flex items-center gap-3 border-b border-grid-strong pb-1 transition-colors focus-within:border-ink">
+    <form onSubmit={handleSubmit} autoComplete="off" className={large ? 'w-full' : 'max-w-md'}>
+      <div
+        className={`flex items-center gap-3 border-b border-grid-strong transition-colors focus-within:border-ink ${
+          large ? 'pb-2' : 'pb-1'
+        }`}
+      >
         <input
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={placeholder}
           aria-label="ZIP code or city"
-          className="w-full bg-transparent font-display text-lg italic text-ink-bright placeholder:text-ink-muted/70 focus:outline-none"
+          className={`w-full bg-transparent font-display italic text-ink-bright placeholder:text-ink-muted/70 focus:outline-none ${
+            large ? 'text-xl sm:text-2xl' : 'text-lg'
+          }`}
         />
         <button
           type="submit"
           aria-label={buttonLabel}
-          className="shrink-0 text-xl leading-none text-ink-muted transition-colors hover:text-ink-bright"
+          className="flex shrink-0 items-baseline gap-2 leading-none text-ink-muted transition-colors hover:text-ink-bright"
         >
-          →
+          {large && <span className="label-caps !text-inherit">Look up</span>}
+          <span className={large ? 'text-2xl' : 'text-xl'}>→</span>
         </button>
       </div>
     </form>
