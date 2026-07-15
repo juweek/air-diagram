@@ -4,7 +4,7 @@ The starting point for small, self-contained **data tool pages**: fetch data
 from a source, let the user look something up by zip / address / county,
 visualize the result (brand SVG charts, p5 canvas, or d3 diagram), and embed
 the whole thing in any host site via iframe.
-
+   
 Each new project is a clone of this repo with the demo gutted and the wiring
 kept. It ships one working example — the **air quality demo** (`/air/:zip`) —
 that exercises every seam end to end.
