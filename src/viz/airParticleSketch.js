@@ -197,8 +197,8 @@ export function airParticleSketch(p, data) {
       this.pulse = pulse;
       this.label = label;
       this.particles = [];
-      // Jitter amplitude — a few px, scaled to band so dense rings stay crisp.
-      this.jitterAmp = Math.min(this.band * 0.2, 3.5);
+      // Jitter amplitude — radial wobble scaled to the ring band.
+      this.jitterAmp = Math.min(this.band * 0.4, 7);
     }
 
     hitRadius() {
@@ -240,9 +240,9 @@ export function airParticleSketch(p, data) {
         if (this.centered) distance = particle.baseDist;
         else if (this.semiCentered) distance = this.radius / 5;
         else distance = particle.baseDist + pulse;
-        // Cheap organic jitter: two sins, no RNG.
+        // Cheap organic jitter: two sins, no RNG — amp tuned for visible wobble.
         const jR = Math.sin(changeVal * 1.7 + particle.phaseR) * jAmp;
-        const jA = Math.sin(changeVal * 2.1 + particle.phaseA) * 0.012;
+        const jA = Math.sin(changeVal * 2.1 + particle.phaseA) * 0.028;
         const a = particle.angle + jA;
         const d = distance + jR;
         p.circle(cx + p.cos(a) * d, cy + p.sin(a) * d, dot);
@@ -315,7 +315,7 @@ export function airParticleSketch(p, data) {
     }
 
     const n = layers.length || 1;
-    const maxR = p.width * 0.42;
+    const maxR = p.width * 0.34;
     const spacing = maxR / n;
     const band = spacing * 0.28;
     const baseDot = Math.max(3.5, p.width / 65);
