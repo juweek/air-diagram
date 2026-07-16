@@ -668,7 +668,7 @@ function Segmented({ value, onChange, options }) {
   return (
     // Standalone borders so these read correctly both in buttonsDiv (desktop)
     // and under the odometer source line (mobile).
-    <div className="inline-flex flex-wrap gap-2">
+    <div className="flex w-full flex-wrap justify-center gap-2 sm:inline-flex sm:w-auto sm:justify-start">
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -884,7 +884,7 @@ function AdviceCount({ n, category }) {
 /* ── Section: collapsible readout card. Soft sand wash so they lift off the
    charcoal readout panel (cream = --ground in this skin — an orange tint at
    low opacity disappears into it). ─────────────────────────────────────────── */
-const SECTION_BG = 'bg-ink/[0.09]';
+const SECTION_BG = 'bg-ground-lift/70';
 
 function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -907,7 +907,7 @@ function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = 
       </button>
       {(open || keepMounted) && (
         <div
-          className={`border-t border-grid-strong/40 px-3.5 pb-5 pt-3.5 sm:px-4 ${
+          className={`rounded-b-lg border-t border-grid-strong/40 bg-cream/85 px-3.5 pb-5 pt-3.5 sm:px-4 ${
             open ? 'block' : 'hidden'
           }`}
         >
@@ -1272,7 +1272,7 @@ function SourceLink({ source }) {
 function SectionSource({ source }) {
   if (!source?.text) return null;
   return (
-    <p className="mt-3 rounded-md border border-grid-strong/50 bg-ink/[0.04] px-2.5 py-2 text-[10px] leading-snug text-ink-muted">
+    <p className="mt-3 rounded-md border border-grid-strong/50 bg-ground-lift/70 px-2.5 py-2 text-[10px] leading-snug text-ink-muted">
       Source:{' '}
       {source.href ? (
         <a href={source.href} target="_blank" rel="noreferrer" className="text-data-primary underline">
@@ -1526,6 +1526,7 @@ function Readout({
   const shownAqi = focus ? focus.aqi : displayAqi;
   const category = aqiCategory(shownAqi);
   const modelForCompare = showingLive && !result.fallback ? modeled : null;
+  const animateKey = showingLive ? `${location.name}-${liveCurrent?.time ?? ''}` : null;
 
   const isIllustrative = !!overlay || !!result.blurb;
   const camsUrl = sourceFor(location).url;
@@ -1569,6 +1570,7 @@ function Readout({
           <AqiMeter
             aqi={shownAqi}
             category={category}
+            animateKey={animateKey}
             badge={
               <span className="sm:hidden">
                 <ProvenanceBadge
@@ -1640,6 +1642,7 @@ function Readout({
           location={location}
         />
       )}
+      {view === 'pollutants' && <PollutantList current={current} source={readingsSource} />}
       {showingLive && <TrendBars history={result.history} source={historySource} />}
       {showingLive && <AlertsSection alerts={result.alerts} />}
 
@@ -1648,15 +1651,12 @@ function Readout({
       )}
 
       {view === 'pollutants' ? (
-        <>
-          <PollutantBreathSection
-            current={current}
-            hidden={hidden}
-            onToggle={onToggle}
-            source={readingsSource}
-          />
-          <PollutantList current={current} source={readingsSource} />
-        </>
+        <PollutantBreathSection
+          current={current}
+          hidden={hidden}
+          onToggle={onToggle}
+          source={readingsSource}
+        />
       ) : (
         <SourceLegend
           current={current}
@@ -1693,10 +1693,14 @@ function gaugeArc(v0, v1) {
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${GAUGE.r} ${GAUGE.r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-function AqiMeter({ aqi, category, badge = null }) {
+function AqiMeter({ aqi, category, badge = null, animateKey = null }) {
   // Mobile: thinner stroke + a vertically SHORTER arc (same width). Desktop
   // keeps the fuller semicircle.
   const [mobile, setMobile] = useState(false);
+  const [needleAqi, setNeedleAqi] = useState(aqi ?? 0);
+  const [jitter, setJitter] = useState(0);
+  const animateRef = useRef(animateKey);
+  const rafRef = useRef(null);
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 640px)');
     const apply = () => setMobile(!mq.matches);
@@ -1704,6 +1708,50 @@ function AqiMeter({ aqi, category, badge = null }) {
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, []);
+  useEffect(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (aqi == null) {
+      setNeedleAqi(0);
+      animateRef.current = animateKey;
+      return undefined;
+    }
+    const shouldAnimate = animateKey != null && animateKey !== animateRef.current;
+    animateRef.current = animateKey;
+    if (!shouldAnimate) {
+      setNeedleAqi(aqi);
+      return undefined;
+    }
+    const duration = 900;
+    const start = performance.now();
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    const tick = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      setNeedleAqi(easeOut(t) * aqi);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    setNeedleAqi(0);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [aqi, animateKey]);
+  useEffect(() => {
+    if (aqi == null) {
+      setJitter(0);
+      return undefined;
+    }
+    let resetId;
+    const id = setInterval(() => {
+      const sign = Math.random() < 0.5 ? -1 : 1;
+      setJitter(sign * 3);
+      if (resetId) clearTimeout(resetId);
+      resetId = setTimeout(() => setJitter(0), 90);
+    }, 1500);
+    return () => {
+      clearInterval(id);
+      if (resetId) clearTimeout(resetId);
+    };
+  }, [aqi]);
   const sw = mobile ? 14 : GAUGE.sw;
 
   // Turn the band spans into cumulative [v0, v1] AQI ranges to draw each arc.
@@ -1713,7 +1761,8 @@ function AqiMeter({ aqi, category, badge = null }) {
     cursor += b.span;
     return seg;
   });
-  const [nx, ny] = gaugePoint(GAUGE.r - sw / 2 - 3, gaugeAngle(aqi ?? 0));
+  const needleValue = Math.min(Math.max((needleAqi ?? 0) + jitter, 0), AQI_MAX);
+  const [nx, ny] = gaugePoint(GAUGE.r - sw / 2 - 3, gaugeAngle(needleValue));
 
   // On mobile, squish the arc + needle vertically toward the flat baseline (cy)
   // so the gauge gets shorter without getting narrower, then crop the freed
@@ -1729,6 +1778,7 @@ function AqiMeter({ aqi, category, badge = null }) {
       {/* Score + category top-left; optional mobile provenance badge top-right. */}
       <div className="mb-0.5 flex items-start justify-between gap-2 sm:mb-1">
         <div className="flex min-w-0 items-baseline gap-2">
+          <span className="text-sm font-semibold text-ink-muted">AQI:</span>
           <span className="text-3xl font-black" style={{ color: category.color }}>
             {aqi ?? '—'}
           </span>
