@@ -294,6 +294,11 @@
     flex-direction: column-reverse;
     align-items: stretch;
   }
+  /* The long "What's in the air in <place>?" question needs less weight on a
+     narrow screen — dial the title down from the 2rem desktop size. */
+  .gourmetMediaContainer > .containerTitleRow > h2 {
+    font-size: 1.5rem;
+  }
   .gourmetMediaContainer .containerTitleRow > :not(h2) {
     align-self: flex-end;
   }

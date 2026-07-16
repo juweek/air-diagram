@@ -461,13 +461,16 @@ function FieldLayerToggles({ view, current, hidden, onToggle }) {
 
   const cols = view === 'pollutants' ? 'grid-cols-2' : 'grid-cols-1';
   return (
-    <ul className={`mt-3 grid ${cols} gap-x-3 gap-y-0.5 text-left`}>
-      {rows.map((e) => (
-        <LegendRow key={e.key} entry={e} off={hidden.includes(e.key)} onToggle={onToggle}>
-          {e.pct != null ? <span className="tabular-nums">{e.pct}%</span> : null}
-        </LegendRow>
-      ))}
-    </ul>
+    <div className="mt-4">
+      <p className="label-caps mb-2 !text-[10px] !text-ink-muted">Tap to show / hide layers</p>
+      <ul className={`grid ${cols} gap-2 text-left`}>
+        {rows.map((e) => (
+          <LegendRow key={e.key} entry={e} off={hidden.includes(e.key)} onToggle={onToggle} boxed>
+            {e.pct != null ? <span className="tabular-nums">{e.pct}%</span> : null}
+          </LegendRow>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -1022,29 +1025,33 @@ const AIRNOW_TO_DRIVER = { 'PM2.5': 'PM2.5', O3: 'ozone', PM10: 'PM10' };
    and the measured-comparison bars on that pollutant; click again to release.
    The hover lift + border shift is the "you can press this" affordance.
 
-   Highlight tracks the focus: with NO focus every chip reads active (the whole
-   set is "on"); focus ONE and only it stays lit — the rest dim — so the strip
-   always mirrors what the gauge is showing. ───────────────────────────────── */
+   Highlight tracks the focus: the ACTIVE chip (today's driver, or whichever is
+   focused) reads at full opacity with a solid-ink border — no fill, the border
+   carries the emphasis; every other chip drops to the dimmed, unfocused state,
+   so the strip always mirrors what the gauge is showing. ─────────────────────── */
 function PollutantChip({ label, display, aqi, isDriver, focus, onPick }) {
   const cat = aqiCategory(aqi);
   const isFocused = focus?.label === label;
-  const dim = focus && !isFocused; // another pollutant owns the view
+  // The chip the gauge is currently showing: the focused one if anything is
+  // focused, otherwise today's driver. Active = full opacity + ink border;
+  // the rest recede to the unfocused (dimmed) state.
+  const active = focus ? isFocused : isDriver;
   return (
     <Tip text={POLLUTANT_BLURBS[display] ?? POLLUTANT_BLURBS[label]}>
       <button
         type="button"
         onClick={() => onPick(label, aqi)}
         aria-pressed={isFocused}
-        className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-all duration-150 hover:-translate-y-px ${
-          isDriver ? 'border-ink bg-ink font-semibold text-cream' : 'border-grid-strong text-ink'
+        className={`inline-flex cursor-pointer items-center gap-1 rounded-full border bg-transparent px-2 py-0.5 text-[11px] transition-all duration-150 hover:-translate-y-px ${
+          active ? 'border-ink font-semibold text-ink' : 'border-grid-strong text-ink'
         } ${
           isFocused
             ? 'ring-1 ring-data-primary ring-offset-1 ring-offset-transparent'
             : 'hover:border-ink-bright'
-        } ${dim ? 'opacity-40' : 'opacity-100'}`}
+        } ${active ? 'opacity-100' : 'opacity-40'}`}
       >
         {display}
-        <span className="font-bold tabular-nums" style={isDriver ? undefined : { color: cat.color }}>
+        <span className="font-bold tabular-nums" style={{ color: cat.color }}>
           {aqi}
         </span>
       </button>
@@ -1733,19 +1740,26 @@ function BreathBars({ sources }) {
   );
 }
 
-// One tappable legend row: checkbox + color dot + label + value (children).
-function LegendRow({ entry, off, onToggle, rose, children }) {
+// One tappable legend/toggle row: checkbox + color dot + label + value.
+// `boxed` gives it the padded, bordered "control" treatment used under the
+// Atmosphere canvas; the plain variant is the tight legend in "What's in a
+// breath". Off = dimmed, unchecked box, struck-through label.
+function LegendRow({ entry, off, onToggle, rose, boxed, children }) {
   return (
     <button
       type="button"
       onClick={() => onToggle(entry.key)}
       aria-pressed={!off}
-      className={`grid w-full grid-cols-[14px_12px_1fr_auto] items-center gap-2 rounded py-0.5 text-left text-sm transition-colors hover:bg-ink/10 ${
-        off ? 'opacity-40' : ''
+      className={`grid w-full grid-cols-[16px_12px_1fr_auto] items-center gap-2.5 text-left text-sm transition-colors ${
+        boxed
+          ? off
+            ? 'rounded-md border border-grid-strong/40 px-3 py-2 opacity-50 hover:opacity-80'
+            : 'rounded-md border border-grid-strong bg-ink/[0.05] px-3 py-2 hover:border-ink/50 hover:bg-ink/10'
+          : `rounded py-0.5 hover:bg-ink/10 ${off ? 'opacity-40' : ''}`
       } ${rose ? 'text-rose' : ''}`}
     >
       <span
-        className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] leading-none ${
+        className={`flex h-4 w-4 items-center justify-center rounded border text-[10px] leading-none ${
           off ? 'border-grid-strong text-transparent' : 'border-ink bg-ink text-cream'
         }`}
       >
@@ -1753,7 +1767,7 @@ function LegendRow({ entry, off, onToggle, rose, children }) {
       </span>
       <span className="h-3 w-3 rounded-full" style={{ background: entry.color }} />
       <span className={off ? 'line-through' : ''}>{entry.label}</span>
-      <span className="font-semibold">{children}</span>
+      <span className="font-semibold tabular-nums">{children}</span>
     </button>
   );
 }
