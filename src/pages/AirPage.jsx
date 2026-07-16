@@ -5,8 +5,8 @@ import { useAsync } from '../lib/useAsync';
 import { getByQuery } from '../data/airQuality';
 import { POLLUTANTS, aqiCategory, aqiGuidance, POLLUTANT_BLURBS } from '../lib/pollutants';
 import { pm25Aqi } from '../lib/nowcast';
-import { SOURCES, ULTRAFINE, AIR_GASES, particleBreakdown } from '../lib/composition';
-import { SCENARIOS } from '../data/scenarios';
+import { SOURCES, ULTRAFINE, particleBreakdown } from '../lib/composition';
+import { SCENARIOS, buildScenario } from '../data/scenarios';
 import LookupInput from '../components/LookupInput';
 import GourmetMediaContainer from '../components/GourmetMediaContainer';
 import { Loading, ErrorState } from '../components/Status';
@@ -102,28 +102,42 @@ export default function AirPage() {
   const navigate = useNavigate();
   const state = useAsync(getByQuery, query);
 
-  const [view, setView] = useState('source'); // 'source' | 'pollutants' | 'rings'
+  const [view, setView] = useState('source'); // 'source' | 'pollutants' | 'breath'
   // Source keys the viewer has switched off in the "what's in a breath" list;
   // hidden specks are dropped from the diagram too. Immutable array so the
   // sketch memo below sees a new reference and remounts on every toggle.
   const [hidden, setHidden] = useState([]);
   const toggleSource = (key) =>
     setHidden((h) => (h.includes(key) ? h.filter((k) => k !== key) : [...h, key]));
-  // "Show sky?" — color the 3D field's background by the sun's position at the
+  // "Sky mode" — color the 3D field's background by the sun's position at the
   // searched place right now. Off by default: the flat charcoal keeps the
   // particles at maximum contrast (see lib/sky.js for the accessibility trade).
   const [showSky, setShowSky] = useState(false);
+  // Within "In a breath": rings (pollution core) vs stacked to-scale zones.
+  const [breathToScale, setBreathToScale] = useState(false);
+  // Scenario overlay on a live place: keeps the location (and its sky) but
+  // swaps the pollutant fields for an illustrative preset. null = live air.
+  // Cleared whenever the URL place changes. URL scenarios (/cigarette) still
+  // load via getByQuery and don't use this overlay.
+  const [scenarioId, setScenarioId] = useState(null);
+  useEffect(() => {
+    setScenarioId(null);
+  }, [query]);
 
   const hasResult = state.status === 'done';
-  const current = hasResult ? state.data.current : null;
+  const liveCurrent = hasResult ? state.data.current : null;
   const location = hasResult ? state.data.location : null;
   const weather = hasResult ? state.data.weather : null;
-  // Scenarios have no coordinates — there is no "there" to have a sky over.
+  // A place with coordinates can show sky — including while a scenario overlays
+  // the fields. Pure URL scenarios have no lat/lon.
   const skyCapable = location?.latitude != null;
-  // The sun's current elevation at the place drives the phase-of-day color; the
-  // hour angle separates dawn from dusk at the same elevation. Live weather
-  // (cloud cover, rain) tints it — overcast greys it, rain darkens it. Both
-  // feed the caption under the toggle so the reader can read the sky.
+  const overlay = skyCapable ? buildScenario(scenarioId) : null;
+  // Field current drives the canvas + composition sections. Live AQI chrome
+  // (meter from monitors, trend, measured compare) stays on the place reading
+  // unless we're in a pure URL scenario.
+  const fieldCurrent = overlay?.current ?? liveCurrent;
+  const isUrlScenario = hasResult && !!state.data.blurb && !skyCapable;
+
   const sun = skyCapable
     ? solarPosition(location.latitude, location.longitude)
     : null;
@@ -135,34 +149,75 @@ export default function AirPage() {
   );
   const skyLabel = skyCapable ? skyCaption(weather) : null;
 
-  // Stable objects so each P5Sketch only remounts on a real data change.
-  // Source/pollutants/baseline: one canvas. Rings: a single ring canvas for
-  // today’s reading (hover names each ring). The fields scale against legal.
-  const sketchData = useMemo(
-    () => ({ current, view: hasResult ? view : 'baseline', mode: 'legal', hidden, sky }),
-    [current, hasResult, view, hidden, sky]
-  );
-  // The two "breath" views (bulk rings + core, and the stacked to-scale zones)
-  // are crisp ring diagrams, not the orbitable 3D field — they render in the
-  // smaller centered panel instead of the big canvas.
-  const isBreath = view === 'breathRings' || view === 'breathScale';
-  const breathData = useMemo(
-    () => ({ current, view, mode: 'legal', hidden }),
-    [current, view, hidden]
-  );
-  const showBreath = hasResult && isBreath;
+  // Sketch view: "breath" tab maps to breathRings or breathScale via the toggle.
+  const sketchView = !hasResult
+    ? 'baseline'
+    : view === 'breath'
+      ? breathToScale
+        ? 'breathScale'
+        : 'breathRings'
+      : view;
 
-  // One source line under the odometer. Scenarios carry their own; places use
-  // the measured monitor sentence when AirNow drives the headline, else CAMS.
+  // Stable objects so each P5Sketch only remounts on a real data change.
+  const sketchData = useMemo(
+    () => ({ current: fieldCurrent, view: sketchView, mode: 'legal', hidden, sky }),
+    [fieldCurrent, sketchView, hidden, sky]
+  );
+  const breathData = useMemo(
+    () => ({ current: fieldCurrent, view: sketchView, mode: 'legal', hidden }),
+    [fieldCurrent, sketchView, hidden]
+  );
+  const showBreath = hasResult && view === 'breath';
+
   const source = hasResult
-    ? (state.data.source ??
-      sourceFor(state.data.location, state.data.measured?.available ? state.data.measured : null))
+    ? overlay
+      ? { label: overlay.source.label, url: overlay.source.url }
+      : (state.data.source ??
+        sourceFor(state.data.location, state.data.measured?.available ? state.data.measured : null))
     : sourceFor(null);
+
+  const seeTheAir = (
+    <FieldView
+      showBreath={showBreath}
+      breathData={breathData}
+      breathToScale={breathToScale}
+      onToggleBreathScale={() => setBreathToScale((s) => !s)}
+      sketchData={sketchData}
+      hasResult={hasResult}
+      skyCapable={skyCapable}
+      showSky={showSky}
+      onToggleSky={() => setShowSky((s) => !s)}
+      skyLabel={skyLabel}
+      scenarioId={overlay?.id ?? (isUrlScenario ? query.toLowerCase() : null)}
+      onScenario={(id) => {
+        if (isUrlScenario) {
+          // Pure scenario URLs still navigate (shareable /cigarette addresses).
+          if (id) navigate(`/${id}`);
+          else navigate('/');
+          return;
+        }
+        setScenarioId(id);
+      }}
+    />
+  );
+
+  // Desktop keeps the field as a left panel beside the readout. Mobile folds
+  // it into a "See the air" Section under the odometer. One mount only — we
+  // pick a slot via matchMedia so p5 never double-runs.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 640px)').matches : true
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const apply = () => setIsDesktop(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   return (
     <div>
-      {/* ── Editorial hero: skyline first, then headline + thesis + search.
-         Scenario presets live under the canvas (near "show sky"), not here. ─ */}
+      {/* ── Editorial hero: skyline first, then headline + thesis + search. ─ */}
       <section className="relative -mt-2 mb-8 pt-2 text-center">
         <HeroBars />
 
@@ -176,8 +231,6 @@ export default function AirPage() {
           place and see.
         </p>
 
-        {/* The search stands alone, centered — the Random jump now lives on the
-           result card below. Extra bottom margin separates it from the chart. */}
         <div className="mx-auto mt-10 max-w-2xl pb-8 sm:mt-14 sm:pb-10">
           <LookupInput
             large
@@ -198,7 +251,6 @@ export default function AirPage() {
               : 'What’s in a breath — on Earth'
           }
           titleAction={
-            // A quick jump to a random US place — shares the title's baseline row.
             <button
               type="button"
               onClick={() => navigate(`/${encodeURIComponent(randomPlace(query.toLowerCase()))}`)}
@@ -209,60 +261,26 @@ export default function AirPage() {
           }
           controls={hasResult ? <Controls view={view} onView={setView} /> : null}
         >
-          {hasResult && state.data.alert && <AlertBanner alert={state.data.alert} />}
-          <div className="flex flex-wrap items-start justify-center gap-6 text-left">
-            {showBreath ? (
-              // Extra side padding on phones shrinks the canvas ~10px and leaves
-              // a gutter to start a vertical scroll past the drag-to-orbit area.
+          <div className="flex flex-wrap items-start justify-center gap-6 text-left sm:items-stretch">
+            {/* Desktop (and baseline): field as a full left panel. */}
+            {(isDesktop || !hasResult) && (
               <div className="w-full max-w-[560px] flex-1 basis-[420px] px-2.5 sm:px-0">
-                <div className="mx-auto max-w-[360px] rounded-lg bg-cream p-2">
-                  <RingPanel
-                    label={view === 'breathScale' ? 'A breath, to scale' : 'What’s in this breath'}
-                    data={breathData}
-                  />
-                </div>
-                <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
-              </div>
-            ) : (
-              <div className="w-full max-w-[560px] flex-1 basis-[420px] px-2.5 sm:px-0">
-                <P5Sketch sketch={airParticleSketch} data={sketchData} />
-                {hasResult && (
-                  <div className="label-caps mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-center">
-                    <span>drag to orbit · scroll or pinch to zoom</span>
-                    {skyCapable && (
-                      <button
-                        type="button"
-                        aria-pressed={showSky}
-                        onClick={() => setShowSky((s) => !s)}
-                        title="Tint the background by the sun’s position and current weather at this place (dimmed so the particles stay readable)"
-                        className={`rounded-md border px-2.5 py-1 transition-colors ${
-                          showSky
-                            ? 'border-ink bg-ink !text-cream'
-                            : 'border-grid-strong !text-ink-muted hover:!border-ink hover:!text-ink'
-                        }`}
-                      >
-                        {showSky ? 'charcoal' : 'show sky?'}
-                      </button>
-                    )}
-                    {showSky && skyLabel && (
-                      <span className="basis-full !text-ink-muted">{skyLabel}</span>
-                    )}
-                  </div>
-                )}
-                <ScenarioBar active={query.toLowerCase()} onPick={(id) => navigate(`/${id}`)} />
+                {hasResult ? seeTheAir : <P5Sketch sketch={airParticleSketch} data={sketchData} />}
               </div>
             )}
-            <aside className="mt-4 w-full flex-1 basis-[260px] border-t border-grid-strong pt-6 sm:mt-0 sm:border-t-0 sm:pt-0">
+            <aside className="mt-4 flex w-full flex-1 basis-[260px] flex-col border-t border-grid-strong pt-6 sm:mt-0 sm:border-t-0 sm:pt-0">
               {hasResult ? (
-                // Keyed by place so the pollutant-focus selection (and any
-                // scroll) resets when the reader jumps somewhere new.
                 <Readout
-                  key={state.data.location.name}
+                  key={`${state.data.location.name}-${overlay?.id ?? 'live'}`}
                   result={state.data}
                   view={view}
                   hidden={hidden}
                   onToggle={toggleSource}
                   source={source}
+                  fieldCurrent={fieldCurrent}
+                  overlay={overlay}
+                  // Mobile only: canvas lives under the odometer as a Section.
+                  seeTheAir={isDesktop ? null : seeTheAir}
                 />
               ) : (
                 <BaselineNote />
@@ -358,20 +376,19 @@ function HeroBars() {
   );
 }
 
-/* ── ScenarioBar: quick presets to compare against a cigarette, wildfire, etc.,
-   as a bordered dropdown. Picking one navigates to /:id — the scenario is a
-   real, shareable address; the select resets to its "Try a scenario" prompt. ── */
-function ScenarioBar({ active, onPick }) {
-  const current = SCENARIOS.find((s) => s.id === active);
+/* ── ScenarioBar: illustrative presets overlaid on the current place. Picking
+   one keeps the location (and its sky) and swaps only the pollutant fields.
+   "Current air quality" clears the overlay and restores the live reading. ── */
+function ScenarioBar({ activeId, onPick }) {
   return (
     <div className="mt-3 flex justify-center">
       <select
-        value={current ? current.id : ''}
-        onChange={(e) => e.target.value && onPick(e.target.value)}
+        value={activeId ?? ''}
+        onChange={(e) => onPick(e.target.value || null)}
         aria-label="Try a scenario"
         className="label-caps cursor-pointer rounded-full border border-grid-strong bg-transparent px-4 py-2 !text-ink transition-colors hover:!border-ink focus:!border-ink focus:outline-none"
       >
-        <option value="">Try a scenario…</option>
+        <option value="">Current air quality</option>
         {SCENARIOS.map((s) => (
           <option key={s.id} value={s.id}>
             {s.label}
@@ -379,6 +396,100 @@ function ScenarioBar({ active, onPick }) {
         ))}
       </select>
     </div>
+  );
+}
+
+/* ── CanvasToggle: map-style on/off chip over the field (sky mode, to scale).
+   Label stays fixed; pressed = on (solid ink), unpressed = off. `onLight` sits
+   on the cream breath panel — use ground-dark text (text-cream = --ground in
+   this inverted skin), never text-ink (that's the tan sand). ─────────────── */
+function CanvasToggle({ pressed, onClick, title, label, onLight = false }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      title={title}
+      className={`label-caps rounded-md border px-2.5 py-1 shadow-sm backdrop-blur-sm transition-colors ${
+        pressed
+          ? onLight
+            ? 'border-ink bg-ink !text-cream'
+            : 'border-ink/80 bg-ink/90 !text-cream'
+          : onLight
+            ? 'border-grid-strong bg-white !text-cream hover:!border-ink'
+            : 'border-cream/50 bg-cream/90 !text-ink hover:!bg-cream'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ── FieldView: the particle/pollutant/breath canvas plus sky / to-scale
+   toggles and scenario picker. Lives inside "See the air" in the readout. ─ */
+function FieldView({
+  showBreath,
+  breathData,
+  breathToScale,
+  onToggleBreathScale,
+  sketchData,
+  hasResult,
+  skyCapable,
+  showSky,
+  onToggleSky,
+  skyLabel,
+  scenarioId,
+  onScenario,
+}) {
+  if (showBreath) {
+    return (
+      <>
+        <div className="relative mx-auto max-w-[360px] rounded-lg bg-cream p-2">
+          <div className="absolute right-2 top-2 z-10">
+            <CanvasToggle
+              pressed={breathToScale}
+              onClick={onToggleBreathScale}
+              title="Toggle between the pollution-core rings and the stacked to-scale breath"
+              label="to scale"
+              onLight
+            />
+          </div>
+          <RingPanel
+            label={breathToScale ? 'A breath, to scale' : 'What’s in this breath'}
+            data={breathData}
+          />
+        </div>
+        {hasResult && <ScenarioBar activeId={scenarioId} onPick={onScenario} />}
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="relative mx-auto max-w-[560px]">
+        <P5Sketch sketch={airParticleSketch} data={sketchData} />
+        {hasResult && skyCapable && (
+          <div className="absolute right-2 top-2 z-10 flex max-w-[12rem] flex-col items-end gap-1">
+            <CanvasToggle
+              pressed={showSky}
+              onClick={onToggleSky}
+              title="Tint the background by the sun’s position and current weather at this place (dimmed so the particles stay readable)"
+              label="sky mode"
+            />
+            {showSky && skyLabel && (
+              <span className="rounded-md bg-cream/90 px-1.5 py-0.5 text-[9px] leading-snug text-ink-muted shadow-sm backdrop-blur-sm">
+                {skyLabel}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      {hasResult && (
+        <div className="label-caps mt-2 text-center !text-ink-muted">
+          drag to orbit · scroll or pinch to zoom
+        </div>
+      )}
+      {hasResult && <ScenarioBar activeId={scenarioId} onPick={onScenario} />}
+    </>
   );
 }
 
@@ -396,12 +507,11 @@ function RingPanel({ label, data }) {
   );
 }
 
-/* ── Controls: the "View" toggle. Four cuts of the same air:
+/* ── Controls: the "View" toggle. Three cuts of the same air:
      • Particulates — modeled PM2.5 origins (3D field).
      • Pollutants — gases as haze, PM as orbs (matched colors).
-     • In a breath — N₂/O₂/Ar as big rings around a tiny pollution core.
-     • Breath, to scale — the breath, then its pollution sliver zoomed.
-   ─────────────────────────────────────────────────────────────────────────── */
+     • In a breath — rings with a pollution core; "to scale" flips to the
+       stacked breath / zoomed-sliver diagram. ─────────────────────────────── */
 function Controls({ view, onView }) {
   return (
     <Segmented
@@ -410,8 +520,7 @@ function Controls({ view, onView }) {
       options={[
         { value: 'source', label: 'Particles in the air' },
         { value: 'pollutants', label: 'Pollutants in the air' },
-        { value: 'breathRings', label: 'In a breath' },
-        { value: 'breathScale', label: 'Breath, to scale' },
+        { value: 'breath', label: 'In a breath' },
       ]}
     />
   );
@@ -513,20 +622,23 @@ function IconBars({ className = 'h-[18px] w-[18px]' }) {
     </svg>
   );
 }
-function IconQuestion({ className = 'h-[18px] w-[18px]' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M9.5 9a2.5 2.5 0 1 1 3.9 2.1c-.7.5-1.4 1-1.4 2.1" strokeLinecap="round" />
-      <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
 function IconPie({ className = 'h-[18px] w-[18px]' }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <path d="M12 3a9 9 0 1 0 9 9h-9V3Z" strokeLinejoin="round" />
       <path d="M12 3a9 9 0 0 1 9 9" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconField({ className = 'h-[18px] w-[18px]' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="6" cy="8" r="1.5" />
+      <circle cx="14" cy="6" r="1.2" />
+      <circle cx="19" cy="11" r="1.4" />
+      <circle cx="9" cy="14" r="1.6" />
+      <circle cx="16" cy="17" r="1.3" />
+      <circle cx="5" cy="18" r="1.1" />
     </svg>
   );
 }
@@ -555,12 +667,32 @@ function SafetyCount({ n, level = 'ok' }) {
   );
 }
 
+// Period-separated tip count for "What should you do?" — Good (green) stays
+// gray so the badge doesn't cheerlead; every other AQI band uses its own color.
+function AdviceCount({ n, category }) {
+  const isGood = category?.name === 'Good';
+  const isYellow = category?.color === '#C7A70A';
+  const tip = `${n} guidance tip${n === 1 ? '' : 's'} for this air`;
+  return (
+    <span
+      className={`flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${
+        isGood ? 'bg-ink/15 text-ink-muted' : isYellow ? 'text-[#1f1c19]' : 'text-cream'
+      }`}
+      style={isGood ? undefined : { background: category.color }}
+      title={tip}
+      aria-label={tip}
+    >
+      {n}
+    </span>
+  );
+}
+
 /* ── Section: collapsible readout card. Soft sand wash so they lift off the
    charcoal readout panel (cream = --ground in this skin — an orange tint at
    low opacity disappears into it). ─────────────────────────────────────────── */
 const SECTION_BG = 'bg-ink/[0.09]';
 
-function Section({ title, icon, badge = null, defaultOpen = true, children }) {
+function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section className={`mt-6 rounded-lg border border-grid-strong ${SECTION_BG}`}>
@@ -579,16 +711,24 @@ function Section({ title, icon, badge = null, defaultOpen = true, children }) {
           </span>
         </span>
       </button>
-      {open && <div className="border-t border-grid-strong/40 px-3.5 pb-5 pt-3.5 sm:px-4">{children}</div>}
+      {(open || keepMounted) && (
+        <div
+          className={`border-t border-grid-strong/40 px-3.5 pb-5 pt-3.5 sm:px-4 ${
+            open ? 'block' : 'hidden'
+          }`}
+        >
+          {children}
+        </div>
+      )}
     </section>
   );
 }
 
-/* ── AlertBanner: an active NWS air alert for the searched point. Full-width
-   strip at the top of the result card — the one place the tool borrows an
-   OFFICIAL voice, so it's visually louder than anything modeled below it.
-   Coverage caveat: these alerts are authored by state air agencies and only
-   distributed by NWS, so silence here is not a clean bill of air. ─────────── */
+/* ── AlertBanner: an active NWS air alert for the searched point. Lives under
+   the odometer (not the graphArea top) so the official voice sits with the
+   reading it qualifies. Coverage caveat: these alerts are authored by state
+   air agencies and only distributed by NWS, so silence here is not a clean
+   bill of air. ───────────────────────────────────────────────────────────── */
 function AlertBanner({ alert }) {
   const until =
     alert.until &&
@@ -598,17 +738,17 @@ function AlertBanner({ alert }) {
       minute: '2-digit',
     });
   return (
-    <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border border-data-primary/60 bg-data-primary/10 px-4 py-2.5 text-left">
-      <span className="label-caps !text-data-primary">⚠ NWS alert</span>
-      <span className="text-sm font-semibold text-ink-bright">{alert.event}</span>
-      {until && <span className="text-xs text-ink-muted">in effect until {until}</span>}
-      {alert.sender && <span className="text-xs text-ink-muted">· {alert.sender}</span>}
-      {alert.more > 0 && <span className="text-xs text-ink-muted">· +{alert.more} more</span>}
+    <div className="mb-4 mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-data-primary/60 bg-data-primary/10 px-2.5 py-1.5 text-left">
+      <span className="label-caps !text-[9px] !text-data-primary">⚠ NWS alert</span>
+      <span className="text-[11px] font-semibold leading-snug text-ink-bright">{alert.event}</span>
+      {until && <span className="text-[10px] text-ink-muted">until {until}</span>}
+      {alert.sender && <span className="text-[10px] text-ink-muted">· {alert.sender}</span>}
+      {alert.more > 0 && <span className="text-[10px] text-ink-muted">· +{alert.more} more</span>}
       <a
         href={alert.url}
         target="_blank"
         rel="noreferrer"
-        className="ml-auto text-xs underline"
+        className="ml-auto text-[10px] underline"
       >
         details
       </a>
@@ -669,14 +809,42 @@ function timeParts(time) {
 }
 
 /* ── TrendBars: "is it getting better?" — the last 24 hours of PM2.5 as tiny
-   bars under the gauge, each coloured by its own AQI category. Hover names the
-   hour and the µg/m³. The values are the same CAMS model series NowCast uses,
-   so this is LIVE MODEL data and the caption says so. ────────────────────── */
+   bars under the gauge, each coloured by its own AQI category. Hover/tap names
+   the hour and the µg/m³. Tooltip clamps to the track so edge bars don’t clip
+   the readout. Same CAMS series NowCast uses — LIVE MODEL, caption says so. */
 function TrendBars({ history, source }) {
   const [hover, setHover] = useState(null);
-  if (!history || history.length < 3) return null;
-  // Oldest → newest, so the most recent reading is always the rightmost bar.
-  const series = [...history].sort((a, b) => (a.time < b.time ? -1 : 1));
+  const [tipShift, setTipShift] = useState(0);
+  const trackRef = useRef(null);
+  const tipRef = useRef(null);
+
+  const series = useMemo(() => {
+    if (!history || history.length < 3) return null;
+    // Oldest → newest, so the most recent reading is always the rightmost bar.
+    return [...history].sort((a, b) => (a.time < b.time ? -1 : 1));
+  }, [history]);
+
+  // After the tip paints centered on the bar, nudge it so it stays inside the
+  // track (left-edge bars shift right, right-edge left). Measure from a clean
+  // -50% so a previous shift never compounds.
+  useLayoutEffect(() => {
+    if (hover == null || !tipRef.current || !trackRef.current) {
+      setTipShift(0);
+      return;
+    }
+    const el = tipRef.current;
+    el.style.transform = 'translateX(-50%)';
+    const tip = el.getBoundingClientRect();
+    const track = trackRef.current.getBoundingClientRect();
+    const pad = 4;
+    let shift = 0;
+    if (tip.left < track.left + pad) shift = track.left + pad - tip.left;
+    else if (tip.right > track.right - pad) shift = track.right - pad - tip.right;
+    setTipShift(shift);
+  }, [hover, series]);
+
+  if (!series) return null;
+
   const max = Math.max(...series.map((h) => h.value), 1);
   const first = timeParts(series[0].time);
   const last = timeParts(series[series.length - 1].time);
@@ -686,13 +854,18 @@ function TrendBars({ history, source }) {
       <div className="mb-1">
         <span className="label-caps">PM2.5 · last {series.length} hrs</span>
       </div>
-      <div className="relative flex h-9 items-end gap-px" onMouseLeave={() => setHover(null)}>
+      <div
+        ref={trackRef}
+        className="relative flex h-9 items-end gap-px overflow-visible"
+        onMouseLeave={() => setHover(null)}
+      >
         {series.map((h, i) => {
           const cat = aqiCategory(pm25Aqi(h.value));
           return (
             <div
               key={h.time}
               onMouseEnter={() => setHover(i)}
+              onPointerDown={() => setHover(i)}
               className="min-w-0 flex-1 cursor-help rounded-sm transition-opacity"
               style={{
                 height: `${Math.max((h.value / max) * 100, 5)}%`,
@@ -704,8 +877,12 @@ function TrendBars({ history, source }) {
         })}
         {hover != null && (
           <div
-            className="pointer-events-none absolute bottom-full z-50 mb-1 -translate-x-1/2 whitespace-nowrap rounded border border-grid-strong bg-cream px-2 py-1 text-[11px] text-ink shadow-xl"
-            style={{ left: `${((hover + 0.5) / series.length) * 100}%` }}
+            ref={tipRef}
+            className="pointer-events-none absolute bottom-full z-50 mb-1 whitespace-nowrap rounded border border-grid-strong bg-cream px-2 py-1 text-[11px] text-ink shadow-xl"
+            style={{
+              left: `${((hover + 0.5) / series.length) * 100}%`,
+              transform: `translateX(calc(-50% + ${tipShift}px))`,
+            }}
           >
             {timeParts(series[hover].time).date}, {timeParts(series[hover].time).hour} ·{' '}
             {series[hover].value.toFixed(1)} µg/m³
@@ -763,7 +940,7 @@ const MEASURED_LABELS = { 'PM2.5': 'PM2.5', O3: 'O₃', PM10: 'PM10' };
 // Focusable pollutants: driver label → where its numbers live. `model` is the
 // CAMS per-pollutant AQI field; `airnow` the AirNow parameter name (only the
 // three AirNow reports). Clicking a chip focuses the odometer AND the
-// "what's been measured" comparison on that pollutant.
+// "Source" comparison on that pollutant.
 const FOCUS_KEYS = {
   'PM2.5': { model: 'us_aqi_pm2_5', airnow: 'PM2.5' },
   PM10: { model: 'us_aqi_pm10', airnow: 'PM10' },
@@ -851,24 +1028,30 @@ function SectionSource({ source }) {
 }
 
 /* ── WhatToDoSection: the actionable takeaway — what the headline AQI means for
-   being outside today. A peer of "What's the trend?" / "What's been measured".
+   being outside today. A peer of "What's the trend?" / "Source".
    The text is the compressed EPA/AirNow activity guidance (aqiGuidance in
-   pollutants.js), keyed to the same category breakpoints as the gauge, led by
-   a colored dot so it reads at the category's severity. ──────────────────── */
+   pollutants.js), keyed to the same category breakpoints as the gauge. One
+   bullet per period-separated tip; the badge counts them. ────────────────── */
 function WhatToDoSection({ aqi, category }) {
   const advice = aqiGuidance(aqi);
   if (!advice) return null;
+  // Crude but stable: one tip per substring between periods. Good air → 0 —
+  // "no precautions" isn't a to-do count.
+  const tips = advice
+    .split('.')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const tipCount = category.name === 'Good' ? 0 : tips.length;
   return (
-    <Section title="What should you do?" icon={<IconQuestion />}>
-      <div className="flex items-start gap-2">
-        <span
-          className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-          style={{ background: category.color }}
-        />
-        <p className="text-xs leading-relaxed text-ink sm:text-sm">
-          <strong style={{ color: category.color }}>{category.name}.</strong> {advice}
-        </p>
-      </div>
+    <Section title="What should you do?" icon={<AdviceCount n={tipCount} category={category} />}>
+      <p className="mb-2 text-xs font-semibold sm:text-sm" style={{ color: category.color }}>
+        {category.name}
+      </p>
+      <ul className="list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-ink sm:text-sm">
+        {tips.map((tip) => (
+          <li key={tip}>{tip}.</li>
+        ))}
+      </ul>
     </Section>
   );
 }
@@ -995,7 +1178,7 @@ function MeasuredComparisonSection({ modeled, measured, focus, current, nowcast,
   const top = Math.max(modelAqi ?? 0, measuredAqi ?? 0) > 200 ? AQI_MAX : 200;
 
   return (
-    <Section title="What’s been measured?" icon={<IconBars />}>
+    <Section title="Source" icon={<IconBars />}>
       <div className="grid gap-3">
         {modelAqi != null && <CompareBar label={modelLabel} value={modelAqi} top={top} />}
         {measuredAqi != null && <CompareBar label={measuredLabel} value={measuredAqi} top={top} />}
@@ -1074,111 +1257,128 @@ function CompareBar({ label, value, top = AQI_MAX, note, emptyLabel = '—' }) {
   );
 }
 
-function Readout({ result, view, hidden, onToggle, source }) {
-  const { location, current, nowcast, monitor } = result;
-  const modeled = headlineAqi(current, nowcast);
-  // A real AirNow reading, when one exists near the search, becomes the headline
-  // and demotes the CAMS model to a comparison — the measured/modeled gap is the
-  // whole point of the piece.
-  const measured = result.measured?.available ? result.measured : null;
+function Readout({ result, view, hidden, onToggle, source, fieldCurrent, overlay, seeTheAir }) {
+  const { location, current: liveCurrent, nowcast, monitor } = result;
+  // Overlay swaps the field pollutants for an illustrative preset but keeps
+  // the place. Live AQI chrome (meter from monitors, trend, measured compare)
+  // only shows when we're on the place's real air — not a scenario overlay.
+  const showingLive = !overlay && !result.blurb;
+  const current = fieldCurrent ?? liveCurrent;
+  const modeled = headlineAqi(current, showingLive ? nowcast : null);
+  const measured = showingLive && result.measured?.available ? result.measured : null;
   const displayAqi = measured ? measured.aqi : modeled.aqi;
-  // A clicked pollutant chip retunes the odometer (and the measured comparison
-  // below) to that pollutant's sub-index. Clicking the same chip releases it.
   const [focus, setFocus] = useState(null); // { label, aqi } | null
   const pickFocus = (label, aqi) =>
     setFocus((f) => (f?.label === label ? null : { label, aqi }));
   const shownAqi = focus ? focus.aqi : displayAqi;
   const category = aqiCategory(shownAqi);
-  // The comparison only makes sense against a live model AQI (not the
-  // typical-annual fallback).
-  const modelForCompare = result.fallback ? null : modeled;
+  const modelForCompare = showingLive && !result.fallback ? modeled : null;
 
-  // Per-section attribution, each a { text, href } so it renders as a real link.
-  // The AQI number and the particle makeup come from DIFFERENT places (a real
-  // monitor drives the headline; the model always drives the makeup), so each
-  // chart cites — and links to — the source it actually used, never letting the
-  // modeled split borrow the monitor's authority. Scenarios are illustrative
-  // literature throughout.
-  const isScenario = !!result.blurb;
-  const camsUrl = sourceFor(location).url; // Open-Meteo air-quality docs, deep-linked to the point
-  const scenarioUrl = result.source?.url ?? EPA_PM_URL;
+  const isIllustrative = !!overlay || !!result.blurb;
+  const camsUrl = sourceFor(location).url;
+  const scenarioUrl = overlay?.source?.url ?? result.source?.url ?? EPA_PM_URL;
   const illustrative = { text: 'Illustrative published levels (EPA / WHO literature)', href: scenarioUrl };
-  const aqiSource = isScenario
+  const aqiSource = isIllustrative
     ? illustrative
     : measured
       ? { text: 'AirNow (US EPA) used for AQI', href: AIRNOW_URL }
       : { text: 'Open-Meteo (CAMS) used for AQI', href: camsUrl };
-  const particleSource = isScenario
+  const particleSource = isIllustrative
     ? illustrative
     : { text: 'Modeling from Open-Meteo (CAMS) used for particle breakdown', href: camsUrl };
-  const readingsSource = isScenario
+  const readingsSource = isIllustrative
     ? illustrative
     : { text: 'Open-Meteo (CAMS) used for pollutant readings', href: camsUrl };
-  const historySource = isScenario
-    ? illustrative
-    : { text: 'Open-Meteo (CAMS) used for the PM2.5 history', href: camsUrl };
+  const historySource = {
+    text: 'Open-Meteo (CAMS) used for the PM2.5 history',
+    href: camsUrl,
+  };
 
   return (
-    // Desktop: bordered card, capped + scrollable so a long list never runs past
-    // the diagram (fixed px, not vh — see the preview quirk in CLAUDE.md).
-    // Mobile: no extra border/bg — GourmetMediaContainer already frames the column.
-    <div className="sm:max-h-[560px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
+    // Desktop: bordered card beside the field, capped + scrollable so a long
+    // list never runs past the diagram. Mobile: no extra frame — canvas folds
+    // into "See the air" under the odometer when seeTheAir is passed.
+    <div className="sm:max-h-[640px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-display text-2xl italic">{location.name}</h3>
-        {/* Provenance settled BEFORE the number is read. */}
         <ProvenanceBadge
           measured={!!measured}
-          fallback={!!result.fallback}
-          scenario={!!result.blurb}
+          fallback={showingLive && !!result.fallback}
+          scenario={isIllustrative}
         />
       </div>
 
-      <AqiMeter aqi={shownAqi} category={category} />
-      {/* The pollutant pills sit directly under the gauge — clicking one focuses
-         the gauge on it and dims the rest (click again to release; no separate
-         "only" button). AirNow's three chips when measured, else the six CAMS
-         sub-indices. */}
-      {measured ? (
-        <MeasuredPills measured={measured} focus={focus} onPick={pickFocus} />
+      {/* Live place: show the real AQI stack. Scenario overlay: hide it — the
+         point is the field comparison, not a second odometer. Pure URL
+         scenarios still show their illustrative AQI. */}
+      {showingLive || result.blurb ? (
+        <>
+          <AqiMeter aqi={shownAqi} category={category} />
+          {showingLive && result.alert && <AlertBanner alert={result.alert} />}
+          {showingLive &&
+            (measured ? (
+              <MeasuredPills measured={measured} focus={focus} onPick={pickFocus} />
+            ) : (
+              <SubIndexStrip
+                current={liveCurrent}
+                driver={modeled.driver}
+                nowcast={nowcast}
+                focus={focus}
+                onPick={pickFocus}
+              />
+            ))}
+          {showingLive && <SourceLink source={source} />}
+        </>
       ) : (
-        <SubIndexStrip
-          current={current}
-          driver={modeled.driver}
+        <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+          Showing <strong className="text-ink">{overlay.label}</strong> over {location.name} — the
+          location and sky stay put; only the particle fields change. Pick{' '}
+          <strong className="text-ink">Current air quality</strong> in the scenario menu to restore
+          today’s reading.
+        </p>
+      )}
+
+      {overlay?.blurb && (
+        <p className="mt-3 rounded-lg border border-grid-strong/50 bg-cream/50 px-3.5 py-3 text-xs leading-relaxed text-ink-muted">
+          {overlay.blurb}
+        </p>
+      )}
+
+      {showingLive && (
+        <ProvenanceSection
+          measured={measured}
+          modeled={modeled}
+          result={result}
+          current={liveCurrent}
           nowcast={nowcast}
+          monitor={monitor}
           focus={focus}
           onPick={pickFocus}
         />
       )}
-      <SourceLink source={source} />
 
-      {/* Provenance, directly under the reading — above the dividing rule. */}
-      <ProvenanceSection
-        measured={measured}
-        modeled={modeled}
-        result={result}
-        current={current}
-        nowcast={nowcast}
-        monitor={monitor}
-        focus={focus}
-        onPick={pickFocus}
-      />
-      {(modelForCompare?.aqi != null || measured) && (
+      {/* Mobile only: field under the odometer, above Source. Desktop passes null. */}
+      {seeTheAir && (
+        <Section title="See the air" icon={<IconField />} defaultOpen keepMounted>
+          {seeTheAir}
+        </Section>
+      )}
+
+      {showingLive && (modelForCompare?.aqi != null || measured) && (
         <MeasuredComparisonSection
           modeled={modelForCompare}
           measured={measured}
           focus={focus}
-          current={current}
+          current={liveCurrent}
           nowcast={nowcast}
           source={aqiSource}
         />
       )}
-      <TrendBars history={result.history} source={historySource} />
+      {showingLive && <TrendBars history={result.history} source={historySource} />}
 
-      {/* What the headline AQI means for the reader's day — a peer section of
-         "What's the trend?" / "What's been measured". Keyed to the OVERALL
-         reading, not a focused pollutant, since the advice is about the air
-         as a whole. */}
-      <WhatToDoSection aqi={displayAqi} category={aqiCategory(displayAqi)} />
+      {showingLive && (
+        <WhatToDoSection aqi={displayAqi} category={aqiCategory(displayAqi)} />
+      )}
 
       {view === 'pollutants' ? (
         <PollutantList current={current} source={readingsSource} />
@@ -1197,10 +1397,9 @@ function Readout({ result, view, hidden, onToggle, source }) {
 
 /* ── AqiMeter: an odometer-style half-gauge. The AQI (0–500) is a needle angle
    sweeping across the six EPA category bands, so the reading is read as a
-   position on the danger arc — not just a number. The gauge is honest-linear
-   (value ∝ angle over 0–500), matching the old bar; the reading + category name
-   sit above it. ─────────────────────────────────────────────────────────── */
-const GAUGE = { cx: 120, cy: 118, r: 92, sw: 22 };
+   position on the danger arc — not just a number. Kept compact (side padding +
+   shorter arc) so it doesn’t dominate the readout. Honest-linear over 0–500. */
+const GAUGE = { cx: 100, cy: 78, r: 62, sw: 16 };
 
 // value (0–500) → needle angle: π (left) at 0 → 0 (right) at 500.
 function gaugeAngle(value) {
@@ -1220,6 +1419,16 @@ function gaugeArc(v0, v1) {
 }
 
 function AqiMeter({ aqi, category }) {
+  // Mobile gets a thinner arc band; desktop keeps the fuller stroke.
+  const [sw, setSw] = useState(GAUGE.sw);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const apply = () => setSw(mq.matches ? GAUGE.sw : 11);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+
   // Turn the band spans into cumulative [v0, v1] AQI ranges to draw each arc.
   let cursor = 0;
   const bands = AQI_BANDS.map((b) => {
@@ -1227,19 +1436,19 @@ function AqiMeter({ aqi, category }) {
     cursor += b.span;
     return seg;
   });
-  const [nx, ny] = gaugePoint(GAUGE.r - GAUGE.sw / 2 - 4, gaugeAngle(aqi ?? 0));
+  const [nx, ny] = gaugePoint(GAUGE.r - sw / 2 - 3, gaugeAngle(aqi ?? 0));
 
   return (
-    <div className="mb-3 mt-3">
+    <div className="mb-3 mt-3 px-8 sm:px-10">
       <div className="mb-1 flex items-baseline gap-2">
-        <span className="text-3xl font-black" style={{ color: category.color }}>
+        <span className="text-2xl font-black sm:text-3xl" style={{ color: category.color }}>
           {aqi ?? '—'}
         </span>
-        <span className="font-semibold text-ink">{category.name}</span>
+        <span className="text-sm font-semibold text-ink sm:text-base">{category.name}</span>
       </div>
       <svg
-        viewBox="0 0 240 140"
-        className="w-full max-w-[260px]"
+        viewBox="0 0 200 96"
+        className="mx-auto block w-full max-w-[155px] sm:max-w-[220px]"
         role="img"
         aria-label={`Air Quality Index ${aqi ?? 'unknown'} out of 500 — ${category.name}`}
       >
@@ -1249,7 +1458,7 @@ function AqiMeter({ aqi, category }) {
             d={gaugeArc(b.v0, b.v1)}
             fill="none"
             stroke={b.color}
-            strokeWidth={GAUGE.sw}
+            strokeWidth={sw}
             opacity={aqi == null ? 0.35 : 1}
           />
         ))}
@@ -1261,16 +1470,16 @@ function AqiMeter({ aqi, category }) {
               x2={nx.toFixed(2)}
               y2={ny.toFixed(2)}
               stroke="#f6efe0"
-              strokeWidth="3"
+              strokeWidth="2.5"
               strokeLinecap="round"
             />
-            <circle cx={GAUGE.cx} cy={GAUGE.cy} r="5.5" fill="#f6efe0" />
+            <circle cx={GAUGE.cx} cy={GAUGE.cy} r="4.5" fill="#f6efe0" />
           </>
         )}
-        <text x={GAUGE.cx - GAUGE.r} y={GAUGE.cy + 16} textAnchor="middle" fontSize="9" fill="#a8987e">
+        <text x={GAUGE.cx - GAUGE.r} y={GAUGE.cy + 14} textAnchor="middle" fontSize="8" fill="#a8987e">
           0
         </text>
-        <text x={GAUGE.cx + GAUGE.r} y={GAUGE.cy + 16} textAnchor="middle" fontSize="9" fill="#a8987e">
+        <text x={GAUGE.cx + GAUGE.r} y={GAUGE.cy + 14} textAnchor="middle" fontSize="8" fill="#a8987e">
           500
         </text>
       </svg>
@@ -1339,9 +1548,9 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
   return (
     <Section title="What’s in this breath" icon={<IconPie />}>
       <p className="mb-2 text-xs leading-relaxed text-ink-muted">
-        By volume a breath is ~78% nitrogen, ~21% oxygen and ~1% argon. Everything leftover is
-        pollution (well under 0.01% of the air). The rings and the bar below show the same modeled
-        split of that pollution sliver.
+        By volume a breath is almost entirely clean air (~78% nitrogen, ~21% oxygen, ~1% argon).
+        Everything leftover is pollution (well under 0.01% of the air). The rings and the bar below
+        show the same modeled split of that pollution sliver.
       </p>
       <BreathBars sources={sources} />
       {/* Percentages only — the raw speck counts are rendering density (they
@@ -1378,7 +1587,7 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
 }
 
 /* ── BreathBars: the whole-breath picture as two linked stacked bars. Bar 1 is
-   the breath itself — almost all clean gas, with a pollutant sliver. Bar 2
+   the breath itself — clean air (one gray band) vs a pollutant sliver. Bar 2
    zooms that sliver into its modeled source split (the same colors as the
    diagram and the legend rows below). Dashed connectors tie the sliver to the
    zoom, agricultural-land-chart style.
@@ -1389,30 +1598,21 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
    implied to be data. Widths are percentage-based, so the markup works at any
    width. ─────────────────────────────────────────────────────────────────── */
 const SLIVER_PCT = 0.5; // drawn width of the pollutant sliver — VISUAL ONLY
-
-// The real composition of dry air by volume (AIR_GASES, shared with the two
-// breath diagrams): N₂/O₂ dominate; argon is a thin but honest ~0.9%. We draw
-// these to their true proportions and only exaggerate the pollutant sliver — so
-// the bar can't lie about how little of a breath is anything but N₂ and O₂.
-const AIR_TOTAL = AIR_GASES.reduce((a, g) => a + g.pct, 0);
+const CLEAN_AIR_COLOR = '#6B7075';
 
 function BreathBars({ sources }) {
   return (
     <div className="mb-3 mt-1" aria-hidden>
-      {/* Bar 1 — the breath itself, to true proportion: N₂ | O₂ | Ar, then the
-          (exaggerated) pollutant sliver. The gas widths share the space left by
-          the sliver, so the segments stay in real ratio to each other. */}
+      {/* Bar 1 — clean air vs the (exaggerated) pollutant sliver. Gas species
+          stay in the caption; the bar itself stays a two-part contrast. */}
       <div className="flex h-7 overflow-hidden rounded-sm border border-grid-strong/70">
-        {AIR_GASES.map((g) => (
-          <div
-            key={g.key}
-            title={`${g.full} (${g.short}) · ${g.pct}%`}
-            className="flex items-center justify-center overflow-hidden text-[10px] font-semibold leading-none text-[#1f1c19]"
-            style={{ width: `${((100 - SLIVER_PCT) * g.pct) / AIR_TOTAL}%`, background: g.color }}
-          >
-            {g.pct >= 5 ? `${g.short} ${Math.round(g.pct)}%` : ''}
-          </div>
-        ))}
+        <div
+          title="Clean air · ~99.99% of a breath by volume"
+          className="flex items-center justify-center overflow-hidden text-[10px] font-semibold leading-none text-cream"
+          style={{ width: `${100 - SLIVER_PCT}%`, background: CLEAN_AIR_COLOR }}
+        >
+          Clean air
+        </div>
         <div
           title="Pollution · under 0.01% (drawn larger to be visible)"
           style={{ width: `${SLIVER_PCT}%`, background: 'rgb(var(--accent))' }}
@@ -1462,9 +1662,9 @@ function BreathBars({ sources }) {
       </div>
 
       <p className="mt-1.5 text-[10px] leading-snug text-ink-muted">
-        The top bar is a breath by volume — ~78% N₂, ~21% O₂, ~0.9% argon. The pollutant sliver at
-        its end is really under 0.01%, drawn at {SLIVER_PCT}% just to be visible; the lower bar zooms
-        that sliver into its modeled sources.
+        The top bar is a breath by volume — almost all clean air (N₂, O₂, Ar). The pollutant sliver
+        at its end is really under 0.01%, drawn at {SLIVER_PCT}% just to be visible; the lower bar
+        zooms that sliver into its modeled sources.
       </p>
     </div>
   );

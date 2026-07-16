@@ -108,17 +108,30 @@ export const SCENARIOS = [
 
 const BY_ID = Object.fromEntries(SCENARIOS.map((s) => [s.id, s]));
 
+/** Resolve a scenario id → preset + `current` shaped like the live API (with us_aqi). */
+export function buildScenario(id) {
+  const s = BY_ID[String(id || '').trim().toLowerCase()];
+  if (!s) return null;
+  return {
+    id: s.id,
+    label: s.label,
+    blurb: s.blurb,
+    source: SCENARIO_SOURCE,
+    current: { ...s.current, us_aqi: scenarioAqi(s.current) },
+  };
+}
+
 // If `query` names a scenario, return a result object shaped exactly like the
 // live data path (location / current / nowcast) plus a `blurb` and `source`.
 // Otherwise null, and the caller falls through to the real geocode + fetch.
 export function getScenario(query) {
-  const s = BY_ID[query.trim().toLowerCase()];
+  const s = buildScenario(query);
   if (!s) return null;
   return {
     location: { name: s.label, latitude: null, longitude: null },
-    current: { ...s.current, us_aqi: scenarioAqi(s.current) },
+    current: s.current,
     nowcast: null,
     blurb: s.blurb,
-    source: SCENARIO_SOURCE,
+    source: s.source,
   };
 }

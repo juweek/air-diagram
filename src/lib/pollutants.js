@@ -68,8 +68,8 @@ export const POLLUTANTS = [
     range: [0, 60],
     who: 25, // WHO 24-hour
     legal: 188, // EPA 1-hour NAAQS (100 ppb ≈ 188 µg/m³)
-    // Green — the tailpipe gas, drawn as green smoke in the pollutant field.
-    color: '#4FB06A',
+    // Red — the tailpipe gas, drawn as red smoke in the pollutant field.
+    color: '#E8443A',
     blurb:
       'Nitrogen dioxide — the signature gas of tailpipes and gas stoves. Inflames airways; a good tracer of fresh traffic exhaust near you.',
   },
@@ -96,8 +96,8 @@ export const POLLUTANTS = [
     range: [50, 600],
     who: 4000, // WHO 24-hour (4 mg/m³)
     legal: 40000, // EPA 1-hour NAAQS (35 ppm ≈ 40 mg/m³)
-    // Red — the combustion gas, drawn as red smoke in the pollutant field.
-    color: '#E8443A',
+    // White — the odorless combustion gas, drawn as pale smoke in the field.
+    color: '#F2F2F2',
     blurb:
       'Carbon monoxide — an odorless combustion gas that binds to blood in place of oxygen. High indoors near flames; usually low outdoors.',
   },
