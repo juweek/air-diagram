@@ -1539,7 +1539,7 @@ function Readout({
     : { text: 'Modeling from Open-Meteo (CAMS) used for particle breakdown', href: camsUrl };
   const readingsSource = isIllustrative
     ? illustrative
-    : { text: 'Open-Meteo (CAMS) used for pollutant readings', href: camsUrl };
+    : { text: 'Modeled pollutant readings and breakdowns by Open-Meteo (CAMS).', href: camsUrl };
   const historySource = {
     text: 'Modeled numbers by Open-Meteo (CAMS).',
     href: camsUrl,
