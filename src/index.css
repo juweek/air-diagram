@@ -276,8 +276,7 @@
 /* Mobile: the card goes truly FULL-BLEED — no box-inside-a-box. The negative
    margins pull it out of the page's centered padding to the viewport edges
    (the classic 50% − 50vw breakout; works because <main> is centered), and the
-   side borders go with it. The graph band keeps its hairline so the field
-   still reads as a contained "window". */
+   side borders go with it. */
 @media (max-width: 768px) {
   .gourmetMediaContainer {
     margin-left: calc(50% - 50vw);
@@ -302,5 +301,12 @@
   .gourmetMediaContainer .selectButton {
     width: 100%;
     padding: 6px 44px 6px 10px;
+  }
+
+  /* View tabs live under the odometer on mobile, so buttonsDiv isn't rendered —
+     drop the graphArea top hairline that used to sit under that divider. */
+  .gourmetMediaContainer .graphArea {
+    border-top: 0;
+    margin-top: 0;
   }
 }

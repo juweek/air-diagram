@@ -418,18 +418,26 @@ export function airParticleSketch(p, data) {
     pulseSpeed = pulseFromAqi(c);
 
     const cx = p.width / 2;
-    const topCy = p.height * 0.26;
-    const botCy = p.height * 0.79;
-    const clusterR = p.width * 0.165;
+    const pad = 40; // px above the top caption, and under the upper cluster
+    const cap = Math.max(11, p.width / 46);
+    // Size clusters to leave room for the two 40px pads + captions in a square canvas.
+    const clusterR = Math.min(
+      p.width * 0.15,
+      (p.height - pad * 2 - cap * 2.5 - 36) / 4
+    );
+    // textAlign CENTER → y is the text midline; pad clears the glyph top.
+    const labelY = pad + cap / 2;
+    const topCy = labelY + cap / 2 + 10 + clusterR;
+    const midLabelY = topCy + clusterR + pad + (cap * 0.92) / 2;
+    const botCy = midLabelY + (cap * 0.92) / 2 + 12 + clusterR;
     const baseDot = Math.max(2.2, p.width / 92);
 
     organics.push(...breathGasRings(cx, topCy, clusterR * 0.12, clusterR, baseDot));
     organics.push(...pollutionRings(c, cx, botCy, clusterR * 0.16, clusterR, Math.max(2, baseDot * 1.1)));
 
-    const cap = Math.max(11, p.width / 46);
     zoneLabels = [
-      { text: 'A breath — 99.99% clean gas', x: cx, y: p.height * 0.045, size: cap },
-      { text: '↓ the pollution in it, zoomed ↓', x: cx, y: p.height * 0.525, size: cap * 0.92 },
+      { text: 'A breath — 99.99% clean gas', x: cx, y: labelY, size: cap },
+      { text: '↓ the pollution in it, zoomed ↓', x: cx, y: midLabelY, size: cap * 0.92 },
     ];
   }
 

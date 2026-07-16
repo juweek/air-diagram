@@ -259,7 +259,7 @@ export default function AirPage() {
               ↺ Random
             </button>
           }
-          controls={hasResult ? <Controls view={view} onView={setView} /> : null}
+          controls={hasResult && isDesktop ? <Controls view={view} onView={setView} /> : null}
         >
           <div className="flex flex-wrap items-start justify-center gap-6 text-left sm:items-stretch">
             {/* Desktop (and baseline): field as a full left panel. */}
@@ -268,7 +268,8 @@ export default function AirPage() {
                 {hasResult ? seeTheAir : <P5Sketch sketch={airParticleSketch} data={sketchData} />}
               </div>
             )}
-            <aside className="mt-4 flex w-full flex-1 basis-[260px] flex-col border-t border-grid-strong pt-6 sm:mt-0 sm:border-t-0 sm:pt-0">
+            {/* No top border/gap on mobile — the city title sits flush under the card title. */}
+            <aside className="flex w-full flex-1 basis-[260px] flex-col">
               {hasResult ? (
                 <Readout
                   key={`${state.data.location.name}-${overlay?.id ?? 'live'}`}
@@ -281,6 +282,11 @@ export default function AirPage() {
                   overlay={overlay}
                   // Mobile only: canvas lives under the odometer as a Section.
                   seeTheAir={isDesktop ? null : seeTheAir}
+                  // Mobile only: view tabs sit under the source line (desktop
+                  // keeps them in the GourmetMediaContainer buttonsDiv).
+                  viewControls={
+                    isDesktop ? null : <Controls view={view} onView={setView} />
+                  }
                 />
               ) : (
                 <BaselineNote />
@@ -399,11 +405,9 @@ function ScenarioBar({ activeId, onPick }) {
   );
 }
 
-/* ── CanvasToggle: map-style on/off chip over the field (sky mode, to scale).
-   Label stays fixed; pressed = on (solid ink), unpressed = off. `onLight` sits
-   on the cream breath panel — use ground-dark text (text-cream = --ground in
-   this inverted skin), never text-ink (that's the tan sand). ─────────────── */
-function CanvasToggle({ pressed, onClick, title, label, onLight = false }) {
+/* ── CanvasToggle: map-style on/off chip over the field (sky mode, separate).
+   Label stays fixed; pressed = on (solid ink), unpressed = off (cream chip). */
+function CanvasToggle({ pressed, onClick, title, label }) {
   return (
     <button
       type="button"
@@ -412,12 +416,8 @@ function CanvasToggle({ pressed, onClick, title, label, onLight = false }) {
       title={title}
       className={`label-caps rounded-md border px-2.5 py-1 shadow-sm backdrop-blur-sm transition-colors ${
         pressed
-          ? onLight
-            ? 'border-ink bg-ink !text-cream'
-            : 'border-ink/80 bg-ink/90 !text-cream'
-          : onLight
-            ? 'border-grid-strong bg-white !text-cream hover:!border-ink'
-            : 'border-cream/50 bg-cream/90 !text-ink hover:!bg-cream'
+          ? 'border-ink/80 bg-ink/90 !text-cream'
+          : 'border-cream/50 bg-cream/90 !text-ink hover:!bg-cream'
       }`}
     >
       {label}
@@ -425,7 +425,7 @@ function CanvasToggle({ pressed, onClick, title, label, onLight = false }) {
   );
 }
 
-/* ── FieldView: the particle/pollutant/breath canvas plus sky / to-scale
+/* ── FieldView: the particle/pollutant/breath canvas plus sky / separate
    toggles and scenario picker. Lives inside "See the air" in the readout. ─ */
 function FieldView({
   showBreath,
@@ -444,20 +444,17 @@ function FieldView({
   if (showBreath) {
     return (
       <>
+        {/* Same map-control overlay as sky mode: chip pinned to the canvas. */}
         <div className="relative mx-auto max-w-[360px] rounded-lg bg-cream p-2">
+          <P5Sketch sketch={airParticleSketch} data={breathData} />
           <div className="absolute right-2 top-2 z-10">
             <CanvasToggle
               pressed={breathToScale}
               onClick={onToggleBreathScale}
-              title="Toggle between the pollution-core rings and the stacked to-scale breath"
-              label="to scale"
-              onLight
+              title="Toggle between the pollution-core rings and the stacked separate breath"
+              label="separate"
             />
           </div>
-          <RingPanel
-            label={breathToScale ? 'A breath, to scale' : 'What’s in this breath'}
-            data={breathData}
-          />
         </div>
         {hasResult && <ScenarioBar activeId={scenarioId} onPick={onScenario} />}
       </>
@@ -493,24 +490,10 @@ function FieldView({
   );
 }
 
-/* ── RingPanel: one labeled pollutant-ring canvas for today’s reading.
-   Density is scaled against a typical urban range (not WHO/legal), and hover
-   still names each ring via the sketch’s in-canvas tooltip. ──────────────── */
-function RingPanel({ label, data }) {
-  return (
-    <div>
-      <div className="py-1 text-center text-xs font-semibold uppercase tracking-wide text-ink-muted">
-        {label}
-      </div>
-      <P5Sketch sketch={airParticleSketch} data={data} />
-    </div>
-  );
-}
-
 /* ── Controls: the "View" toggle. Three cuts of the same air:
      • Particulates — modeled PM2.5 origins (3D field).
      • Pollutants — gases as haze, PM as orbs (matched colors).
-     • In a breath — rings with a pollution core; "to scale" flips to the
+     • In a breath — rings with a pollution core; "separate" flips to the
        stacked breath / zoomed-sliver diagram. ─────────────────────────────── */
 function Controls({ view, onView }) {
   return (
@@ -528,16 +511,18 @@ function Controls({ view, onView }) {
 
 function Segmented({ value, onChange, options }) {
   return (
-    // No wrapping border here — each option already carries its own pill border
-    // (from the .buttonsDiv button convention in index.css).
+    // Standalone borders so these read correctly both in buttonsDiv (desktop)
+    // and under the odometer source line (mobile).
     <div className="inline-flex flex-wrap gap-2">
       {options.map((opt) => (
         <button
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
-            value === opt.value ? '!bg-ink !text-cream' : 'text-ink-muted hover:!text-ink'
+          className={`rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors ${
+            value === opt.value
+              ? '!border-ink !bg-ink !text-cream'
+              : 'border-grid-strong text-ink-muted hover:!border-ink hover:!text-ink'
           }`}
         >
           {opt.label}
@@ -1257,7 +1242,17 @@ function CompareBar({ label, value, top = AQI_MAX, note, emptyLabel = '—' }) {
   );
 }
 
-function Readout({ result, view, hidden, onToggle, source, fieldCurrent, overlay, seeTheAir }) {
+function Readout({
+  result,
+  view,
+  hidden,
+  onToggle,
+  source,
+  fieldCurrent,
+  overlay,
+  seeTheAir,
+  viewControls,
+}) {
   const { location, current: liveCurrent, nowcast, monitor } = result;
   // Overlay swaps the field pollutants for an illustrative preset but keeps
   // the place. Live AQI chrome (meter from monitors, trend, measured compare)
@@ -1355,6 +1350,11 @@ function Readout({ result, view, hidden, onToggle, source, fieldCurrent, overlay
           focus={focus}
           onPick={pickFocus}
         />
+      )}
+
+      {/* Mobile: view tabs under the source line, above the first Section. */}
+      {viewControls && (
+        <div className="mt-6 border-t border-grid-strong pt-5">{viewControls}</div>
       )}
 
       {/* Mobile only: field under the odometer, above Source. Desktop passes null. */}
@@ -1620,29 +1620,28 @@ function BreathBars({ sources }) {
       </div>
 
       {/* Dashed connectors: the sliver's edges fan out to bar 2's full width.
-          Tall enough that the dashes read as lines, not a hairline smudge. */}
-      <svg viewBox="0 0 100 22" preserveAspectRatio="none" className="block h-6 w-full sm:h-7">
+          Right edge is inset slightly so the stroke isn't half-clipped (which
+          made one leg look washed out). Both legs use the same solid white. */}
+      <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="block h-7 w-full sm:h-8">
         <line
           x1={100 - SLIVER_PCT}
           y1="0"
-          x2="0"
-          y2="22"
-          stroke="rgb(var(--sand-muted))"
-          strokeWidth="1.25"
+          x2="0.5"
+          y2="28"
+          stroke="rgb(var(--sand-bright))"
+          strokeWidth="1.5"
           strokeDasharray="3 3"
           vectorEffect="non-scaling-stroke"
-          opacity="0.85"
         />
         <line
-          x1="100"
+          x1={99.5}
           y1="0"
-          x2="100"
-          y2="22"
-          stroke="rgb(var(--sand-muted))"
-          strokeWidth="1.25"
+          x2={99.5}
+          y2="28"
+          stroke="rgb(var(--sand-bright))"
+          strokeWidth="1.5"
           strokeDasharray="3 3"
           vectorEffect="non-scaling-stroke"
-          opacity="0.85"
         />
       </svg>
 
