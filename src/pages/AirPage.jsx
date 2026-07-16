@@ -35,11 +35,13 @@ const DRIVER_MONITOR = {
 };
 
 function measuredSourceLabel(measured) {
+  // "Ozone air monitor in the Boise area (2 mi away), July 15, 2026. 7:00pm MST, via AirNow (US EPA)"
   const drive = DRIVER_MONITOR[measured.driver] ?? { article: 'a', noun: measured.driver || 'PM2.5' };
-  const art = drive.article.charAt(0).toUpperCase() + drive.article.slice(1);
+  const noun = drive.noun.charAt(0).toUpperCase() + drive.noun.slice(1);
+  const area = measured.reportingArea || 'local';
   const dist = measured.distanceMi != null ? ` (${measured.distanceMi} mi away)` : '';
   const when = measured.observedAt ? `, ${measured.observedAt}` : '';
-  return `${art} ${drive.noun} air monitor in the ${measured.reportingArea} reporting area${dist}${when}, via AirNow (US EPA).`;
+  return `${noun} air monitor in the ${area} area${dist}${when}, via AirNow (US EPA)`;
 }
 
 // The source link points at the API docs. Once we know the place, we deep-link
@@ -1294,7 +1296,9 @@ function Readout({
     // list never runs past the diagram. Mobile: no extra frame — canvas folds
     // into "See the air" under the odometer when seeTheAir is passed.
     <div className="sm:max-h-[640px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
+      {/* Desktop only — on mobile the card title already names the place, so
+         this row (city + Measured pill) just pushes the odometer down. */}
+      <div className="mb-1 hidden items-start justify-between gap-3 sm:flex">
         <h3 className="font-display text-2xl italic">{location.name}</h3>
         <ProvenanceBadge
           measured={!!measured}
@@ -1439,7 +1443,8 @@ function AqiMeter({ aqi, category }) {
   const [nx, ny] = gaugePoint(GAUGE.r - sw / 2 - 3, gaugeAngle(aqi ?? 0));
 
   return (
-    <div className="mb-3 mt-3 px-8 sm:px-10">
+    <div className="mb-3 mt-0 sm:mt-3 sm:px-10">
+      {/* Score + category sit top-left (esp. on mobile, where the city title is hidden). */}
       <div className="mb-1 flex items-baseline gap-2">
         <span className="text-2xl font-black sm:text-3xl" style={{ color: category.color }}>
           {aqi ?? '—'}
@@ -1448,7 +1453,7 @@ function AqiMeter({ aqi, category }) {
       </div>
       <svg
         viewBox="0 0 200 96"
-        className="mx-auto block w-full max-w-[155px] sm:max-w-[220px]"
+        className="block w-full max-w-[155px] sm:mx-auto sm:max-w-[220px]"
         role="img"
         aria-label={`Air Quality Index ${aqi ?? 'unknown'} out of 500 — ${category.name}`}
       >
