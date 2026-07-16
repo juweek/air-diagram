@@ -86,6 +86,24 @@ export const AIR_GASES = [
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 const map = (v, a, b, c, d) => c + ((v - a) / (b - a)) * (d - c);
+const AQI_FIELDS = [
+  'us_aqi',
+  'us_aqi_pm2_5',
+  'us_aqi_pm10',
+  'us_aqi_ozone',
+  'us_aqi_nitrogen_dioxide',
+  'us_aqi_sulphur_dioxide',
+  'us_aqi_carbon_monoxide',
+];
+
+function aqiScaleFromCurrent(current) {
+  if (!current) return 1;
+  const maxAqi = Math.max(
+    ...AQI_FIELDS.map((k) => (typeof current[k] === 'number' ? current[k] : 0)),
+    0
+  );
+  return clamp(maxAqi / 100, 0.5, 2.2);
+}
 
 // Density multiplier for the scattered source view. Pollution is well under
 // 0.01% of a breath by volume — the field has to stay sparse enough that the
@@ -150,9 +168,10 @@ export function particleBreakdown(current, mode = 'legal') {
   const line = mode === 'who' ? PM25_LINES.who : PM25_LINES.legal;
   const ratio = clamp((current.pm2_5 ?? 0) / line, 0, 6);
   const scale = densityScale();
+  const aqiScale = aqiScaleFromCurrent(current);
   // Sparse on purpose: a breath is ~99.99% N₂/O₂/Ar. The swarm is an intensity
   // diagram, not a particle census — keep the field mostly empty dark.
-  const total = Math.round(map(ratio, 0, 6, 22, 560) * scale);
+  const total = Math.round(map(ratio, 0, 6, 22, 560) * scale * aqiScale);
 
   const sources = {};
   for (const s of SOURCES) {
@@ -160,7 +179,7 @@ export function particleBreakdown(current, mode = 'legal') {
   }
   // Ultrafine dominates the heavy-combustion scenarios (cigarette, joint); a
   // lower multiplier keeps those fields from overwhelming the canvas.
-  const ultrafine = Math.round(comp.ultrafineIndex * 85 * scale);
+  const ultrafine = Math.round(comp.ultrafineIndex * 85 * scale * aqiScale);
 
   return { sources, ultrafine, total, fractions: comp.fractions, line, ratio };
 }
@@ -227,11 +246,12 @@ function particleNumberDensity(ugPerM3, diamUm) {
  * is the fraction of total mass across pollutants and `kindShare` is the
  * fraction within the gas/particle family.
  */
-export function pollutantAbundance(current) {
+export function pollutantAbundance(current, { aqiScale } = {}) {
   const scale = densityScale();
+  const aqiFactor = clamp(aqiScale ?? 1, 0.4, 2.4);
   // Canvas budget for the total mass-based field (shared across gases + particles).
   // Kept lower than the source-view budget so the field doesn't read denser.
-  const totalBudget = Math.round(420 * scale);
+  const totalBudget = Math.round(320 * scale * aqiFactor);
 
   const gases = [];
   const particles = [];
@@ -249,35 +269,31 @@ export function pollutantAbundance(current) {
     particles.push({ key, raw: ug });
   }
 
-  const gasTotal = gases.reduce((a, g) => a + Math.sqrt(g.raw), 0) || 1;
-  const particleTotal = particles.reduce((a, g) => a + Math.sqrt(g.raw), 0) || 1;
+  const gasTotal = gases.reduce((a, g) => a + g.raw, 0) || 1;
+  const particleTotal = particles.reduce((a, g) => a + g.raw, 0) || 1;
   const totalSoft = gasTotal + particleTotal || 1;
 
-  // sqrt softens the within-family dynamic range so a minority species (e.g.
-  // coarse PM next to fine PM, or NO₂ next to CO) still draws a few dots,
-  // while the majority still clearly dominates. Ratios stay directionally true.
+  // Mass-proportional shares; small species can fall to the minimum dot floor.
   return [
     ...gases.map((g) => {
-      const soft = Math.sqrt(g.raw);
       return {
         key: g.key,
         kind: 'gas',
         raw: g.raw,
-        share: soft / totalSoft,
-        kindShare: soft / gasTotal,
-        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / totalSoft) * totalBudget)),
+        share: g.raw / totalSoft,
+        kindShare: g.raw / gasTotal,
+        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((g.raw / totalSoft) * totalBudget)),
         size: GAS_SPECK_SIZE,
       };
     }),
     ...particles.map((g) => {
-      const soft = Math.sqrt(g.raw);
       return {
         key: g.key,
         kind: 'particle',
         raw: g.raw,
-        share: soft / totalSoft,
-        kindShare: soft / particleTotal,
-        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / totalSoft) * totalBudget)),
+        share: g.raw / totalSoft,
+        kindShare: g.raw / particleTotal,
+        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((g.raw / totalSoft) * totalBudget)),
         size: POLLUTANT_SPECK_SIZE[g.key] ?? GAS_SPECK_SIZE,
       };
     }),

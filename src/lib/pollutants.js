@@ -68,8 +68,8 @@ export const POLLUTANTS = [
     range: [0, 60],
     who: 25, // WHO 24-hour
     legal: 188, // EPA 1-hour NAAQS (100 ppb ≈ 188 µg/m³)
-    // Red — the tailpipe gas, drawn as red smoke in the pollutant field.
-    color: '#E8443A',
+    // Green — tailpipe gas, drawn as green smoke in the pollutant field.
+    color: '#57B36F',
     blurb:
       'Nitrogen dioxide — the signature gas of tailpipes and gas stoves. Inflames airways; a good tracer of fresh traffic exhaust near you.',
   },

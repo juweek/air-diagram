@@ -137,6 +137,15 @@ const POLLUTANT_BY_KEY = Object.fromEntries(POLLUTANTS.map((d) => [d.key, d]));
 const SOURCE_BY_KEY = Object.fromEntries(
   [...SOURCES, ULTRAFINE].map((s) => [s.key, s])
 );
+const AQI_FIELDS = [
+  'us_aqi',
+  'us_aqi_pm2_5',
+  'us_aqi_pm10',
+  'us_aqi_ozone',
+  'us_aqi_nitrogen_dioxide',
+  'us_aqi_sulphur_dioxide',
+  'us_aqi_carbon_monoxide',
+];
 
 // Earth's clean breath by composition. Shown until a place is searched — the
 // same "what's in a breath" ring language as the pollution source rings, but
@@ -512,7 +521,11 @@ export function airParticleSketch(p, data) {
   // range), so a wisp of CO reads differently from a wall of ozone.
   function buildPollutants(c) {
     const HAZE_PUFFS = typeof window !== 'undefined' && window.innerWidth < 700 ? 28 : 40;
-    const abundance = pollutantAbundance(c);
+    const maxAqi = Math.max(
+      ...AQI_FIELDS.map((k) => (typeof c?.[k] === 'number' ? c[k] : 0)),
+      0
+    );
+    const abundance = pollutantAbundance(c, { aqiScale: clamp(maxAqi / 100, 0.5, 2.2) });
     const groups = [];
     for (const a of abundance) {
       const def = POLLUTANT_BY_KEY[a.key];
