@@ -173,8 +173,22 @@ export function airParticleSketch(p, data) {
   // pointermove listener on the canvas (removed with the canvas on unmount).
   const mouse = { x: -1, y: -1 };
 
-  // Size to the P5Sketch mount node (which p5 sets as the canvas parent).
-  const hostWidth = () => Math.min(p.canvas?.parentElement?.clientWidth || CANVAS_MAX, CANVAS_MAX);
+  // Content width of the P5Sketch mount node (p5 sets it as the canvas parent).
+  // A 0 means the panel is collapsed (display:none) or not laid out yet — NOT a
+  // real size, so callers must treat 0 as "don't resize" rather than falling back
+  // to CANVAS_MAX (that fallback is what left the canvas 800px tall on re-expand).
+  const hostWidth = () => Math.min(p.canvas?.parentElement?.clientWidth || 0, CANVAS_MAX);
+
+  // Resize the square canvas to fit its container. Skips a 0/hidden width so a
+  // resize fired while the Atmosphere panel is collapsed can't bloat it.
+  const fitToHost = () => {
+    const size = hostWidth();
+    if (size > 0 && size !== p.width) {
+      p.resizeCanvas(size, size);
+      skyGradientCache = null; // gradient is sized to the canvas
+      build(); // rings/baseline are canvas-relative — rebuild so radii stay inside
+    }
+  };
 
   function pulseFromAqi(c) {
     return p.constrain(p.map(c.us_aqi ?? 0, 0, 300, 0.11, 0.34), 0.11, 0.34);
@@ -509,10 +523,14 @@ export function airParticleSketch(p, data) {
         // size and opacity together so density reads as concentration.
         const thickness = pollutantNorm(def, c[def.key] ?? 0); // 0..1.25
         const bulk = 0.6 + thickness; // 0.6 (wisp) → ~1.85 (thick)
+        const share = a.kindShare ?? a.share;
         groups.push({
           color: def.color,
           size: [14 * (0.75 + thickness * 0.5), 28 * (0.75 + thickness * 0.5)],
-          count: Math.max(a.share > 0.02 ? 2 : 0, Math.round(a.share * HAZE_PUFFS * (0.7 + thickness * 0.6))),
+          count: Math.max(
+            share > 0.02 ? 2 : 0,
+            Math.round(share * HAZE_PUFFS * (0.7 + thickness * 0.6))
+          ),
           opacity: bulk,
           haze: true,
         });
@@ -721,9 +739,25 @@ export function airParticleSketch(p, data) {
     // Rings only pulse — 24fps is plenty. 3D needs 60 for orbit smoothness.
     p.frameRate(is3D ? 60 : 24);
     ground = groundColor();
-    const size = hostWidth();
+    // Fall back to CANVAS_MAX for the FIRST paint only — some hosts (and this
+    // preview harness) report a 0 width before first layout. The ResizeObserver
+    // below corrects it the moment the container reports a real width.
+    const size = hostWidth() || CANVAS_MAX;
     p.resizeCanvas(size, size);
     build();
+    // Re-fit whenever the container's size actually changes. Crucially, the
+    // Atmosphere panel collapsing/expanding resizes the mount with NO window
+    // 'resize' event, so windowResized() alone missed it — the canvas stayed at
+    // the 800px fallback and re-expanded far too tall. Disconnect on teardown.
+    if (typeof ResizeObserver !== 'undefined' && p.canvas?.parentElement) {
+      const ro = new ResizeObserver(() => fitToHost());
+      ro.observe(p.canvas.parentElement);
+      const removeInstance = p.remove.bind(p);
+      p.remove = () => {
+        ro.disconnect();
+        removeInstance();
+      };
+    }
     if (is3D) initCameraControls();
     else {
       // Ring/baseline views: track the pointer for the hover hit-test, and
@@ -748,15 +782,7 @@ export function airParticleSketch(p, data) {
     }
   };
 
-  p.windowResized = () => {
-    const size = hostWidth();
-    if (size !== p.width) {
-      p.resizeCanvas(size, size);
-      skyGradientCache = null; // gradient is sized to the canvas
-      // Rings/baseline are canvas-relative — rebuild so radii stay inside.
-      build();
-    }
-  };
+  p.windowResized = () => fitToHost();
 
   p.draw = () => {
     if (kind === 'source') {

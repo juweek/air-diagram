@@ -19,20 +19,57 @@ import { PM25_LINES } from './pollutants.js';
 // hue's meaning (smoke = warm ash, haze = cool blue, wildfire = purple, …) but
 // bright enough to read both as a glowing orb and as a legend swatch.
 export const SOURCES = [
-  { key: 'soot', label: 'Combustion soot', color: '#CBBDA6', size: [1.4, 2.8] },
-  { key: 'brake', label: 'Road & brake dust', color: '#DE9440', size: [2.5, 4.5] },
-  { key: 'haze', label: 'Sulfate & nitrate haze', color: '#8FB2E6', size: [2, 3.5] },
-  { key: 'wildfire', label: 'Wildfire char', color: '#C06BCB', size: [2, 4] },
+  {
+    key: 'soot',
+    label: 'Combustion soot',
+    color: '#CBBDA6',
+    size: [1.4, 2.8],
+    blurb:
+      'Black-carbon particles straight from burning fuel — vehicle exhaust, power plants, wood and coal smoke. The core of urban PM2.5.',
+  },
+  {
+    key: 'brake',
+    label: 'Road & brake dust',
+    color: '#DE9440',
+    size: [2.5, 4.5],
+    blurb:
+      'Non-tailpipe traffic particles: worn brake pads and tires plus road grit stirred back into the air. Rises with traffic, not fuel.',
+  },
+  {
+    key: 'haze',
+    label: 'Sulfate & nitrate haze',
+    color: '#8FB2E6',
+    size: [2, 3.5],
+    blurb:
+      'Secondary particles that form in the air itself as SO₂ and NO₂ gases react — the fine, milky haze that drifts far downwind of its source.',
+  },
+  {
+    key: 'wildfire',
+    label: 'Wildfire char',
+    color: '#C06BCB',
+    size: [2, 4],
+    blurb:
+      'Charred organic particles lofted by wildfires. Light enough to travel thousands of miles, so smoke days can hit places far from any fire.',
+  },
   // bio currently draws 0 specks — no measured proxy exists for it (see
   // composition() below) and zero must mean zero. Kept for a future pollen feed.
-  { key: 'bio', label: 'Pollen & biological', color: '#6BD08F', size: [3.5, 6] },
+  {
+    key: 'bio',
+    label: 'Pollen & biological',
+    color: '#6BD08F',
+    size: [3.5, 6],
+    blurb:
+      'Living and once-living particles — pollen, mold spores, bacteria. Seasonal and mostly coarse; a big allergy driver.',
+  },
 ];
 
 export const ULTRAFINE = {
   key: 'ultrafine',
   label: 'Ultrafine',
   color: '#F0584A',
-  size: [0.7, 1.4],
+  size: [0.55, 1.1],
+  blurb:
+    'The tiniest particles (under 0.1 µm), mostly from fresh combustion. Too small to register in the PM2.5 mass number, yet small enough to cross from the lungs into the blood.',
 };
 
 // The bulk of every breath, by volume. N₂/O₂/Ar are ~99.96% of dry air; all the
@@ -185,16 +222,16 @@ function particleNumberDensity(ugPerM3, diamUm) {
 }
 
 /**
- * Relative draw counts for the pollutant field. Returns
- * `{ key, color, size, count, kind, share }[]` where `share` is the fraction
- * within that kind (gas or particle), summing to ~1 per kind.
+ * Relative draw counts for the pollutant field based on mass concentration.
+ * Returns `{ key, color, size, count, kind, share, kindShare }[]` where `share`
+ * is the fraction of total mass across pollutants and `kindShare` is the
+ * fraction within the gas/particle family.
  */
 export function pollutantAbundance(current) {
   const scale = densityScale();
-  // Canvas budgets — gases usually dominate outdoor molecule counts, so they
-  // get the larger share of dots; particles stay readable as a separate family.
-  const gasBudget = Math.round(380 * scale);
-  const particleBudget = Math.round(180 * scale);
+  // Canvas budget for the total mass-based field (shared across gases + particles).
+  // Kept lower than the source-view budget so the field doesn't read denser.
+  const totalBudget = Math.round(420 * scale);
 
   const gases = [];
   const particles = [];
@@ -204,16 +241,17 @@ export function pollutantAbundance(current) {
   for (const key of Object.keys(GAS_MW)) {
     const ug = current[key];
     if (ug == null || ug <= 0) continue;
-    gases.push({ key, raw: gasNumberDensity(ug, GAS_MW[key]) });
+    gases.push({ key, raw: ug });
   }
   for (const key of Object.keys(PARTICLE_DIAM_UM)) {
     const ug = current[key];
     if (ug == null || ug <= 0) continue;
-    particles.push({ key, raw: particleNumberDensity(ug, PARTICLE_DIAM_UM[key]) });
+    particles.push({ key, raw: ug });
   }
 
   const gasTotal = gases.reduce((a, g) => a + Math.sqrt(g.raw), 0) || 1;
   const particleTotal = particles.reduce((a, g) => a + Math.sqrt(g.raw), 0) || 1;
+  const totalSoft = gasTotal + particleTotal || 1;
 
   // sqrt softens the within-family dynamic range so a minority species (e.g.
   // coarse PM next to fine PM, or NO₂ next to CO) still draws a few dots,
@@ -225,8 +263,9 @@ export function pollutantAbundance(current) {
         key: g.key,
         kind: 'gas',
         raw: g.raw,
-        share: soft / gasTotal,
-        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / gasTotal) * gasBudget)),
+        share: soft / totalSoft,
+        kindShare: soft / gasTotal,
+        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / totalSoft) * totalBudget)),
         size: GAS_SPECK_SIZE,
       };
     }),
@@ -236,8 +275,9 @@ export function pollutantAbundance(current) {
         key: g.key,
         kind: 'particle',
         raw: g.raw,
-        share: soft / particleTotal,
-        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / particleTotal) * particleBudget)),
+        share: soft / totalSoft,
+        kindShare: soft / particleTotal,
+        count: Math.max(g.raw > 0 ? 3 : 0, Math.round((soft / totalSoft) * totalBudget)),
         size: POLLUTANT_SPECK_SIZE[g.key] ?? GAS_SPECK_SIZE,
       };
     }),

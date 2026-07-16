@@ -244,7 +244,7 @@ export async function getByQuery(query) {
       history,
       monitor: await monitorP,
       measured: await measuredP,
-      alert: await alertsP,
+      alerts: await alertsP,
       weather: await weatherP,
     };
   } catch (liveErr) {
@@ -264,7 +264,7 @@ export async function getByQuery(query) {
       nowcast: null,
       monitor: await monitorP,
       measured,
-      alert: await alertsP,
+      alerts: await alertsP,
       weather: await weatherP,
       fallback: typical ? { kind: 'typical-annual', distanceMi: typical.distanceMi } : null,
     };

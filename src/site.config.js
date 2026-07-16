@@ -33,7 +33,7 @@ const site = {
     sourceOrg:
       'measured AQI via AirNow (EPA) where a monitor is near; ZIP lookup via Zippopotam.us; nearest-monitor distances + typical annual levels compiled from EPA AQS (2024–25)',
     sourceUrl: 'https://open-meteo.com/en/docs/air-quality-api',
-    note: 'Where a monitor is nearby the headline is a real AirNow reading; otherwise it’s a CAMS model estimate. The source split and ultrafine swarm are always modeled illustrations — that gap is the point.',
+    note: 'Where a monitor is nearby the headline is a real AirNow reading; otherwise it’s a CAMS model estimate.',
   },
 };
 

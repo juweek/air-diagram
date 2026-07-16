@@ -27,20 +27,40 @@ export async function fetchAirAlerts(latitude, longitude) {
       .map((f) => f.properties)
       .filter((p) => p && AIR_EVENT_RE.test(p.event ?? ''));
     if (air.length === 0) return null;
-    // One banner, worst-first: NWS orders by severity/onset already; just take
-    // the first and note how many more there are.
-    const a = air[0];
-    return {
+    // Return EVERY active air alert for this point, worst-first (NWS already
+    // orders by severity/onset). The alert carries its OWN text — `description`
+    // is the full message and `areaDesc` the specific counties/zones — so that
+    // is the immediate, area-specific answer and we surface it inline instead of
+    // sending people to a generic list page (the old per-alert human pages on
+    // alerts.weather.gov were retired; the API's `web` field is just weather.gov).
+    const mapped = air.map((a) => ({
+      id: a.id ?? a['@id'] ?? `${a.event}-${a.sent}`,
       event: a.event,
       headline: a.headline ?? null,
+      areaDesc: a.areaDesc ?? null,
+      description: a.description ?? null,
+      instruction: a.instruction ?? null,
       until: a.ends ?? a.expires ?? null,
       sender: a.senderName ?? null,
-      more: air.length - 1,
-      // The public alerts page. (The old alerts.weather.gov host was retired by
-      // NWS and no longer resolves; this is its replacement. There's no stable
-      // human-facing page per individual alert, so this lists active ones.)
-      url: 'https://www.weather.gov/alerts',
-    };
+    }));
+    const seen = new Set();
+    const deduped = [];
+    for (const alert of mapped) {
+      const key = [
+        alert.id,
+        alert.event,
+        alert.areaDesc,
+        alert.description,
+        alert.until,
+        alert.sender,
+      ]
+        .filter(Boolean)
+        .join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(alert);
+    }
+    return deduped.length ? deduped : null;
   } catch {
     return null;
   }

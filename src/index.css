@@ -272,6 +272,13 @@
 .gourmetMediaContainer canvas {
   max-width: 100%;
 }
+/* Keep the (square) sketch canvas from ever rendering taller than its width:
+   when max-width clamps the width, height follows the intrinsic ratio instead of
+   staying at the attribute height. Belt-and-suspenders for the resize-on-expand
+   fix in airParticleSketch.js (a stale 800px-tall canvas looked "too long"). */
+.gourmetMediaContainer canvas {
+  height: auto;
+}
 
 /* Mobile: the card goes truly FULL-BLEED — no box-inside-a-box. The negative
    margins pull it out of the page's centered padding to the viewport edges
