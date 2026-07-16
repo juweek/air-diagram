@@ -884,7 +884,7 @@ function AdviceCount({ n, category }) {
 /* ── Section: collapsible readout card. Soft sand wash so they lift off the
    charcoal readout panel (cream = --ground in this skin — an orange tint at
    low opacity disappears into it). ─────────────────────────────────────────── */
-const SECTION_BG = 'bg-ground-lift/70';
+const SECTION_BG = 'bg-ground-lift/40';
 
 function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -907,7 +907,7 @@ function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = 
       </button>
       {(open || keepMounted) && (
         <div
-          className={`rounded-b-lg border-t border-grid-strong/40 bg-cream/85 px-3.5 pb-5 pt-3.5 sm:px-4 ${
+          className={`rounded-b-lg border-t border-grid-strong/40 bg-cream/50 px-3.5 pb-5 pt-3.5 sm:px-4 ${
             open ? 'block' : 'hidden'
           }`}
         >
@@ -1272,7 +1272,7 @@ function SourceLink({ source }) {
 function SectionSource({ source }) {
   if (!source?.text) return null;
   return (
-    <p className="mt-3 rounded-md border border-grid-strong/50 bg-ground-lift/70 px-2.5 py-2 text-[10px] leading-snug text-ink-muted">
+    <p className="mt-3 rounded-md border border-grid-strong/50 bg-ground-lift/40 px-2.5 py-2 text-[10px] leading-snug text-ink-muted">
       Source:{' '}
       {source.href ? (
         <a href={source.href} target="_blank" rel="noreferrer" className="text-data-primary underline">
