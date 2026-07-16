@@ -1704,7 +1704,7 @@ function AqiMeter({ aqi, category, badge = null }) {
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, []);
-  const sw = mobile ? 9 : GAUGE.sw;
+  const sw = mobile ? 14 : GAUGE.sw;
 
   // Turn the band spans into cumulative [v0, v1] AQI ranges to draw each arc.
   let cursor = 0;
@@ -1725,7 +1725,7 @@ function AqiMeter({ aqi, category, badge = null }) {
   const viewBox = mobile ? '0 20 200 78' : '0 0 200 96';
 
   return (
-    <div className="mb-2 mt-0 px-3 sm:mb-3 sm:mt-3 sm:px-10">
+    <div className="mb-2 mt-0 px-5 sm:mb-3 sm:mt-3 sm:px-10">
       {/* Score + category top-left; optional mobile provenance badge top-right. */}
       <div className="mb-0.5 flex items-start justify-between gap-2 sm:mb-1">
         <div className="flex min-w-0 items-baseline gap-2">
