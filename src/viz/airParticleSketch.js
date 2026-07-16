@@ -503,6 +503,7 @@ export function airParticleSketch(p, data) {
     for (const a of abundance) {
       const def = POLLUTANT_BY_KEY[a.key];
       if (!def) continue;
+      if (hidden.includes(a.key) || hidden.includes(def.key)) continue;
       if (a.kind === 'gas' || def.form === 'gas') {
         // 0 = barely there, ~1 = a high day for this gas. Drives puff count,
         // size and opacity together so density reads as concentration.

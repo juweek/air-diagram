@@ -18,7 +18,7 @@ import { solarPosition, skyStops, skyCaption } from '../lib/sky';
 // monitor reading. The label says so: the tool must not commit the sin the
 // piece critiques (a modeled number dressed up as a measurement).
 const SOURCE_LABEL =
-  'Modeled interpolation between distant monitors (CAMS model, ~11 km grid), the same kind of estimate most phone apps show.';
+  'Modeled interpolation between distant monitors (CAMS model, ~11 km grid)';
 const SOURCE_BASE = 'https://open-meteo.com/en/docs/air-quality-api';
 
 // Provider landing pages the per-section source links point at.
@@ -181,6 +181,10 @@ export default function AirPage() {
   const seeTheAir = (
     <FieldView
       showBreath={showBreath}
+      view={view}
+      current={fieldCurrent}
+      hidden={hidden}
+      onToggle={toggleSource}
       breathData={breathData}
       breathToScale={breathToScale}
       onToggleBreathScale={() => setBreathToScale((s) => !s)}
@@ -204,7 +208,7 @@ export default function AirPage() {
   );
 
   // Desktop keeps the field as a left panel beside the readout. Mobile folds
-  // it into a "See the air" Section under the odometer. One mount only — we
+  // it into an "Atmosphere" Section under the odometer. One mount only — we
   // pick a slot via matchMedia so p5 never double-runs.
   const [isDesktop, setIsDesktop] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 640px)').matches : true
@@ -427,10 +431,54 @@ function CanvasToggle({ pressed, onClick, title, label }) {
   );
 }
 
+/* ── FieldLayerToggles: checkboxes under the Atmosphere canvas to show/hide
+   layers. Particles / breath → modeled PM2.5 sources; Pollutants → API species.
+   Same `hidden` set the sketch already reads. ─────────────────────────────── */
+function FieldLayerToggles({ view, current, hidden, onToggle }) {
+  if (!current || !onToggle) return null;
+
+  let rows = [];
+  if (view === 'pollutants') {
+    rows = POLLUTANTS.filter((d) => current[d.key] != null && current[d.key] > 0).map((d) => ({
+      key: d.key,
+      label: d.label,
+      color: d.color,
+    }));
+  } else {
+    // source + breath tabs: modeled particle makeup
+    const breakdown = particleBreakdown(current, 'legal');
+    rows = SOURCES.map((s) => ({
+      key: s.key,
+      label: s.label,
+      color: s.color,
+      pct: Math.round((breakdown.fractions[s.key] ?? 0) * 100),
+    })).filter((s) => s.pct > 0);
+    if (breakdown.ultrafine > 0) {
+      rows.push({ key: ULTRAFINE.key, label: ULTRAFINE.label, color: ULTRAFINE.color });
+    }
+  }
+  if (rows.length === 0) return null;
+
+  const cols = view === 'pollutants' ? 'grid-cols-2' : 'grid-cols-1';
+  return (
+    <ul className={`mt-3 grid ${cols} gap-x-3 gap-y-0.5 text-left`}>
+      {rows.map((e) => (
+        <LegendRow key={e.key} entry={e} off={hidden.includes(e.key)} onToggle={onToggle}>
+          {e.pct != null ? <span className="tabular-nums">{e.pct}%</span> : null}
+        </LegendRow>
+      ))}
+    </ul>
+  );
+}
+
 /* ── FieldView: the particle/pollutant/breath canvas plus sky / separate
-   toggles and scenario picker. Lives inside "See the air" in the readout. ─ */
+   toggles, layer checkboxes, and scenario picker. ─────────────────────────── */
 function FieldView({
   showBreath,
+  view,
+  current,
+  hidden,
+  onToggle,
   breathData,
   breathToScale,
   onToggleBreathScale,
@@ -443,6 +491,13 @@ function FieldView({
   scenarioId,
   onScenario,
 }) {
+  // Layer show/hide is mobile-only — desktop has room to read the full field.
+  const toggles = hasResult ? (
+    <div className="sm:hidden">
+      <FieldLayerToggles view={view} current={current} hidden={hidden} onToggle={onToggle} />
+    </div>
+  ) : null;
+
   if (showBreath) {
     return (
       <>
@@ -458,6 +513,7 @@ function FieldView({
             />
           </div>
         </div>
+        {toggles}
         {hasResult && <ScenarioBar activeId={scenarioId} onPick={onScenario} />}
       </>
     );
@@ -487,6 +543,7 @@ function FieldView({
           drag to orbit · scroll or pinch to zoom
         </div>
       )}
+      {toggles}
       {hasResult && <ScenarioBar activeId={scenarioId} onPick={onScenario} />}
     </>
   );
@@ -711,11 +768,9 @@ function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = 
   );
 }
 
-/* ── AlertBanner: an active NWS air alert for the searched point. Lives under
-   the odometer (not the graphArea top) so the official voice sits with the
-   reading it qualifies. Coverage caveat: these alerts are authored by state
-   air agencies and only distributed by NWS, so silence here is not a clean
-   bill of air. ───────────────────────────────────────────────────────────── */
+/* ── AlertBanner: the NWS air-alert chip. Shown inside the Alerts section when
+   expanded. Coverage caveat: these alerts are authored by state air agencies
+   and only distributed by NWS, so silence is not a clean bill of air. ───── */
 function AlertBanner({ alert }) {
   const until =
     alert.until &&
@@ -725,7 +780,7 @@ function AlertBanner({ alert }) {
       minute: '2-digit',
     });
   return (
-    <div className="mb-4 mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-data-primary/60 bg-data-primary/10 px-2.5 py-1.5 text-left">
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-data-primary/60 bg-data-primary/10 px-2.5 py-1.5 text-left">
       <span className="label-caps !text-[9px] !text-data-primary">⚠ NWS alert</span>
       <span className="text-[11px] font-semibold leading-snug text-ink-bright">{alert.event}</span>
       {until && <span className="text-[10px] text-ink-muted">until {until}</span>}
@@ -740,6 +795,29 @@ function AlertBanner({ alert }) {
         details
       </a>
     </div>
+  );
+}
+
+function AlertCount({ n }) {
+  const tip = `${n} active alert${n === 1 ? '' : 's'}`;
+  return (
+    <span
+      className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-data-primary px-1.5 text-[11px] font-bold tabular-nums text-cream"
+      title={tip}
+      aria-label={tip}
+    >
+      {n}
+    </span>
+  );
+}
+
+function AlertsSection({ alert }) {
+  if (!alert) return null;
+  const count = 1 + (alert.more ?? 0);
+  return (
+    <Section title="Alerts" icon={<AlertCount n={count} />} defaultOpen>
+      <AlertBanner alert={alert} />
+    </Section>
   );
 }
 
@@ -974,15 +1052,9 @@ function PollutantChip({ label, display, aqi, isDriver, focus, onPick }) {
   );
 }
 
-/* ── ProvenanceSection: ONE source of truth for the headline number, in its own
-   titled section. The most accurate source wins and is the ONLY one shown, so
-   the reader is never handed two contradictory provenance lines:
-     • measured  → a real AirNow monitor reading (headline + per-pollutant chips)
-     • fallback  → nearest monitor's typical annual average (live data is down)
-     • scenario  → the preset's blurb
-     • modeled   → CAMS estimate + how far the nearest real monitor is (the gap)
-   The nearest-monitor "your number is a model stretched over that gap" line only
-   appears in the MODELED case — when a monitor reading exists it would be a lie. */
+/* ── ProvenanceSection (below): unique notes only — fallback / scenario blurb /
+   nearest-monitor gap. Driver chips live under the odometer; measured Source:
+   lives in SourceLink. */
 function SourceLink({ source }) {
   if (!source) return null;
   return (
@@ -1043,10 +1115,11 @@ function WhatToDoSection({ aqi, category }) {
   );
 }
 
-function ProvenanceSection({ measured, modeled, result, current, nowcast, monitor, focus, onPick }) {
-  // Measured provenance now lives in the Source: line under the odometer — no
-  // duplicate "Detected from…" card. Keep this block for fallback / scenario /
-  // modeled extras (sub-index chips + nearest-monitor gap).
+function ProvenanceSection({ measured, result, monitor }) {
+  // Measured provenance lives in the Source: line under the odometer. Driver
+  // chips (MeasuredPills / SubIndexStrip) also live under the odometer — do not
+  // re-render them here. This block is only for unique notes: fallback, scenario
+  // blurb, or the nearest-monitor gap on modeled readings.
   if (measured) return null;
 
   if (result.fallback) {
@@ -1070,36 +1143,13 @@ function ProvenanceSection({ measured, modeled, result, current, nowcast, monito
     );
   }
 
-  // Modeled: sub-index chips + nearest-monitor gap (CAMS sentence is the Source: line).
-  if (!monitor) {
-    // Still show the driver chips when we have them; wrap only if strip renders.
-    return (
-      <div className="mt-4">
-        <SubIndexStrip
-          current={current}
-          driver={modeled.driver}
-          nowcast={nowcast}
-          focus={focus}
-          onPick={onPick}
-        />
-      </div>
-    );
-  }
+  if (!monitor) return null;
 
   return (
-    <div className="mt-4 rounded-lg border border-grid-strong/50 bg-cream/50 px-3.5 py-3 sm:px-4">
-      <SubIndexStrip
-        current={current}
-        driver={modeled.driver}
-        nowcast={nowcast}
-        focus={focus}
-        onPick={onPick}
-      />
-      <p className="mt-2 rounded-lg border border-dashed border-grid-strong bg-cream/60 px-3 py-2 text-xs leading-relaxed text-ink">
-        The nearest regulatory PM2.5 monitor is <strong>{monitor.distanceMi} mi</strong> away —{' '}
-        {monitor.name} ({monitor.county} County, {monitor.state}). Your number is a model stretched
-        over that gap. Only ~1 in 5 US counties has one at all.
-      </p>
+    <div className="mt-4 rounded-lg border border-dashed border-grid-strong bg-cream/60 px-3 py-2 text-xs leading-relaxed text-ink">
+      The nearest regulatory PM2.5 monitor is <strong>{monitor.distanceMi} mi</strong> away —{' '}
+      {monitor.name} ({monitor.county} County, {monitor.state}). Your number is a model stretched
+      over that gap. Only ~1 in 5 US counties has one at all.
     </div>
   );
 }
@@ -1277,9 +1327,7 @@ function Readout({
   const illustrative = { text: 'Illustrative published levels (EPA / WHO literature)', href: scenarioUrl };
   const aqiSource = isIllustrative
     ? illustrative
-    : measured
-      ? { text: 'AirNow (US EPA) used for AQI', href: AIRNOW_URL }
-      : { text: 'Open-Meteo (CAMS) used for AQI', href: camsUrl };
+    : { text: source.label, href: source.url };
   const particleSource = isIllustrative
     ? illustrative
     : { text: 'Modeling from Open-Meteo (CAMS) used for particle breakdown', href: camsUrl };
@@ -1294,7 +1342,7 @@ function Readout({
   return (
     // Desktop: bordered card beside the field, capped + scrollable so a long
     // list never runs past the diagram. Mobile: no extra frame — canvas folds
-    // into "See the air" under the odometer when seeTheAir is passed.
+    // into "Atmosphere" under the odometer when seeTheAir is passed.
     <div className="sm:max-h-[640px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
       {/* City name + badge on desktop. On mobile the city is in the card title;
          the badge rides the AQI score row instead (see AqiMeter). */}
@@ -1325,7 +1373,6 @@ function Readout({
               </span>
             }
           />
-          {showingLive && result.alert && <AlertBanner alert={result.alert} />}
           {showingLive &&
             (measured ? (
               <MeasuredPills measured={measured} focus={focus} onPick={pickFocus} />
@@ -1338,7 +1385,12 @@ function Readout({
                 onPick={pickFocus}
               />
             ))}
-          {showingLive && <SourceLink source={source} />}
+          {/* Desktop only — on mobile the Source section carries this line. */}
+          {showingLive && (
+            <div className="hidden sm:block">
+              <SourceLink source={source} />
+            </div>
+          )}
         </>
       ) : (
         <p className="mt-3 text-xs leading-relaxed text-ink-muted">
@@ -1356,16 +1408,7 @@ function Readout({
       )}
 
       {showingLive && (
-        <ProvenanceSection
-          measured={measured}
-          modeled={modeled}
-          result={result}
-          current={liveCurrent}
-          nowcast={nowcast}
-          monitor={monitor}
-          focus={focus}
-          onPick={pickFocus}
-        />
+        <ProvenanceSection measured={measured} result={result} monitor={monitor} />
       )}
 
       {/* Mobile: view tabs under the source line, above the first Section. */}
@@ -1375,7 +1418,7 @@ function Readout({
 
       {/* Mobile only: field under the odometer, above Source. Desktop passes null. */}
       {seeTheAir && (
-        <Section title="See the air" icon={<IconField />} defaultOpen keepMounted>
+        <Section title="Atmosphere" icon={<IconField />} defaultOpen keepMounted>
           {seeTheAir}
         </Section>
       )}
@@ -1391,6 +1434,7 @@ function Readout({
         />
       )}
       {showingLive && <TrendBars history={result.history} source={historySource} />}
+      {showingLive && <AlertsSection alert={result.alert} />}
 
       {showingLive && (
         <WhatToDoSection aqi={displayAqi} category={aqiCategory(displayAqi)} />
