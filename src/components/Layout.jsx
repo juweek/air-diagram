@@ -30,30 +30,67 @@ export default function Layout({ children }) {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* Off-screen filter that gives the fixed nav its "liquid glass"
+         refraction: feTurbulence → feDisplacementMap warps whatever scrolls
+         behind the pill (referenced from backdrop-filter in index.css). */}
+      <svg className="pointer-events-none absolute h-0 w-0" aria-hidden focusable="false">
+        <filter id="liquid-glass-distortion" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.014 0.02"
+            numOctaves="2"
+            seed="7"
+            result="noise"
+          />
+          <feGaussianBlur in="noise" stdDeviation="1.4" result="blurredNoise" />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="blurredNoise"
+            scale="26"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </svg>
+
+      {/* Desktop: the two nav items float in a centered, fixed liquid-glass pill
+         that stays pinned as the page scrolls underneath it. */}
+      <nav className="liquid-glass fixed left-1/2 top-4 z-50 hidden -translate-x-1/2 items-center gap-1 rounded-full px-2.5 py-2.5 sm:flex">
+        {site.nav.map((item) => (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            end={item.path === '/'}
+            className={({ isActive }) =>
+              `label-caps rounded-full px-4 py-2.5 transition-colors ${
+                isActive
+                  ? '!bg-ink !text-cream'
+                  : '!text-ink hover:!bg-ink/10 hover:!text-ink-bright'
+              }`
+            }
+          >
+            {item.label}
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Desktop: the support CTA is its own fixed liquid-glass pill, pinned
+         top-right, matching the nav. (Mobile keeps its in-header button.) */}
+      <a
+        href={site.support.url}
+        target="_blank"
+        rel="noreferrer"
+        className="liquid-glass label-caps fixed right-6 top-4 z-50 hidden items-center rounded-full px-5 py-2.5 !text-ink transition-colors hover:!text-ink-bright sm:flex"
+      >
+        {site.support.label}
+      </a>
+
       <header className="border-b border-grid-medium/70">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
           <div className="flex items-center gap-6">
             <NavLink to="/" className="font-display text-lg italic text-ink-bright">
               {site.title}
             </NavLink>
-            <nav className="hidden gap-6 sm:flex">
-              {site.nav.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  end={item.path === '/'}
-                  className={({ isActive }) =>
-                    `label-caps border-b pb-0.5 transition-colors ${
-                      isActive
-                        ? '!text-ink-bright border-current'
-                        : 'border-transparent hover:!text-ink'
-                    }`
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative sm:hidden" ref={menuRef}>
@@ -97,10 +134,9 @@ export default function Layout({ children }) {
               href={site.support.url}
               target="_blank"
               rel="noreferrer"
-              className="label-caps rounded-full border border-grid-strong px-3 py-2 !text-ink transition-colors hover:!border-ink sm:px-4"
+              className="label-caps rounded-full border border-grid-strong px-3 py-2 !text-ink transition-colors hover:!border-ink sm:hidden"
             >
-              <span className="sm:hidden">Support</span>
-              <span className="hidden sm:inline">{site.support.label}</span>
+              Support
             </a>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAsync } from '../lib/useAsync';
@@ -98,6 +98,12 @@ const AQI_BANDS = [
  * is a shareable/embeddable address (/Detroit, /90001). view/mode are local
  * state, NOT part of the fetch key, so toggling them never refetches.
  */
+// Single source of truth for "are we on the desktop layout?" — the same
+// isDesktop the page computes for the two-column split. Sections read it so
+// their desktop-collapsed defaults never disagree with the layout (a separate
+// matchMedia call could evaluate differently, especially in embeds).
+const DesktopContext = createContext(true);
+
 export default function AirPage() {
   const { query: rawQuery } = useParams();
   const query = rawQuery ? decodeURIComponent(rawQuery) : '';
@@ -125,6 +131,17 @@ export default function AirPage() {
   useEffect(() => {
     setScenarioId(null);
   }, [query]);
+
+  // Landing on the bare '/' , jump straight to a real place (random) shown in
+  // sky mode — so the first thing you see is actual air over an actual sky, not
+  // a one-off baseline demo. `replace` keeps '/' out of history so Back behaves.
+  const didAutoLand = useRef(false);
+  useEffect(() => {
+    if (query || didAutoLand.current) return;
+    didAutoLand.current = true;
+    setShowSky(true);
+    navigate(`/${encodeURIComponent(randomPlace(''))}`, { replace: true });
+  }, [query, navigate]);
 
   const hasResult = state.status === 'done';
   const liveCurrent = hasResult ? state.data.current : null;
@@ -222,22 +239,22 @@ export default function AirPage() {
   }, []);
 
   return (
-    <div>
+    <DesktopContext.Provider value={isDesktop}>
       {/* ── Editorial hero: skyline first, then headline + thesis + search. ─ */}
       <section className="relative -mt-2 mb-8 pt-2 text-center">
         <HeroBars />
 
-        <h2 className="mt-10 font-display text-5xl italic leading-[1.02] text-ink-bright sm:mt-12 sm:text-7xl lg:text-8xl">
+        <h2 className="mt-10 px-6 font-display text-5xl italic leading-[1.02] text-ink-bright sm:mt-12 sm:text-7xl lg:text-8xl">
           What’s actually
           <br />
           in the air?
         </h2>
-        <p className="mx-auto mb-7 mt-6 max-w-prose font-display text-lg leading-relaxed text-ink-muted">
+        <p className="mx-auto mb-7 mt-6 max-w-md px-6 font-display text-lg leading-relaxed text-ink-muted">
           The line for ‘legal’ clean air is far looser than for what’s actually healthy. Search a
           place and see.
         </p>
 
-        <div className="mx-auto mt-10 max-w-2xl pb-8 sm:mt-14 sm:pb-10">
+        <div className="mx-auto mt-12 max-w-md px-6 pb-8 sm:mt-20 sm:pb-10">
           <LookupInput
             large
             defaultValue={query}
@@ -301,7 +318,7 @@ export default function AirPage() {
           </div>
         </GourmetMediaContainer>
       </div>
-    </div>
+    </DesktopContext.Provider>
   );
 }
 
@@ -316,7 +333,7 @@ export default function AirPage() {
    eases each bar there. Transform-only — no layout, no repaint of anything but
    the bars — and each bar keeps its slot, so the skyline breathes rather than
    rearranges. Skipped under prefers-reduced-motion and in hidden tabs. ─────── */
-const RESHUFFLE_MS = 4000;
+const RESHUFFLE_MS = 2000;
 // Deterministic PRNG so a given (bar, tick) pair always lands the same height.
 function seededRand(seed) {
   let s = seed % 2147483647;
@@ -349,14 +366,15 @@ function HeroBars() {
   const scales = useMemo(() => {
     if (tick === 0) return bars.map(() => 1);
     const rand = seededRand(tick * 7919 + 13);
-    return bars.map(() => 0.78 + rand() * 0.44);
+    // Wider swing than before (~±40%) so the skyline visibly heaves each tick.
+    return bars.map(() => 0.6 + rand() * 0.8);
   }, [bars, tick]);
 
   return (
     <svg
       viewBox="0 0 1200 150"
       preserveAspectRatio="none"
-      className="mt-2 h-40 w-full sm:h-36"
+      className="mt-2 h-24 w-full sm:h-36"
       aria-hidden
     >
       <defs>
@@ -886,8 +904,21 @@ function AdviceCount({ n, category }) {
    low opacity disappears into it). ─────────────────────────────────────────── */
 const SECTION_BG = 'bg-ground-lift/40';
 
-function Section({ title, icon, badge = null, defaultOpen = true, keepMounted = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
+function Section({
+  title,
+  icon,
+  badge = null,
+  // Both layouts start collapsed by default — the readout reads as a tidy stack
+  // of headers. Mobile opens only the section that opts in via defaultOpen
+  // (Atmosphere); desktop opens only the ones that opt in via desktopOpen
+  // (currently none). Evaluated once at mount.
+  defaultOpen = false,
+  desktopOpen = false,
+  keepMounted = false,
+  children,
+}) {
+  const isDesktop = useContext(DesktopContext);
+  const [open, setOpen] = useState(isDesktop ? desktopOpen : defaultOpen);
   return (
     <section className={`mt-6 rounded-lg border border-grid-strong ${SECTION_BG}`}>
       <button
@@ -995,7 +1026,7 @@ function AlertCount({ n }) {
 function AlertsSection({ alerts }) {
   if (!alerts || alerts.length === 0) return null;
   return (
-    <Section title="Alerts" icon={<AlertCount n={alerts.length} />} defaultOpen>
+    <Section title="Alerts" icon={<AlertCount n={alerts.length} />}>
       <div className="grid gap-2">
         {alerts.map((a, i) => (
           <AlertBanner key={a.id ?? i} alert={a} />
@@ -1550,7 +1581,7 @@ function Readout({
     // Desktop: bordered card beside the field, capped + scrollable so a long
     // list never runs past the diagram. Mobile: no extra frame — canvas folds
     // into "Atmosphere" under the odometer when seeTheAir is passed.
-    <div className="sm:max-h-[640px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
+    <div className="sm:max-h-[840px] sm:overflow-y-auto sm:rounded-lg sm:border sm:border-grid-strong sm:bg-cream/60 sm:p-5">
       {/* City name + badge on desktop. On mobile the city is in the card title;
          the badge rides the AQI score row instead (see AqiMeter). */}
       <div className="mb-1 hidden items-start justify-between gap-3 sm:flex">
@@ -1743,10 +1774,10 @@ function AqiMeter({ aqi, category, badge = null, animateKey = null }) {
     let resetId;
     const id = setInterval(() => {
       const sign = Math.random() < 0.5 ? -1 : 1;
-      setJitter(sign * 3);
+      setJitter(sign * 7);
       if (resetId) clearTimeout(resetId);
-      resetId = setTimeout(() => setJitter(0), 90);
-    }, 1500);
+      resetId = setTimeout(() => setJitter(0), 100);
+    }, 1000);
     return () => {
       clearInterval(id);
       if (resetId) clearTimeout(resetId);
@@ -1774,7 +1805,7 @@ function AqiMeter({ aqi, category, badge = null, animateKey = null }) {
   const viewBox = mobile ? '0 20 200 78' : '0 0 200 96';
 
   return (
-    <div className="mb-2 mt-0 px-5 sm:mb-3 sm:mt-3 sm:px-10">
+    <div className="mb-2 mt-0 px-8 sm:mb-3 sm:mt-3 sm:px-16">
       {/* Score + category top-left; optional mobile provenance badge top-right. */}
       <div className="mb-0.5 flex items-start justify-between gap-2 sm:mb-1">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -1788,7 +1819,7 @@ function AqiMeter({ aqi, category, badge = null, animateKey = null }) {
       </div>
       <svg
         viewBox={viewBox}
-        className="block w-full max-w-[118px] sm:mx-auto sm:max-w-[220px]"
+        className="block w-full max-w-[118px] sm:mx-auto sm:max-w-[196px]"
         role="img"
         aria-label={`Air Quality Index ${aqi ?? 'unknown'} out of 500 — ${category.name}`}
       >
@@ -1878,7 +1909,7 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
   // apportion — say so plainly instead of drawing an empty list.
   if (sources.length === 0 && breakdown.ultrafine === 0) {
     return (
-      <Section title="What’s in this breath" icon={<IconPie />}>
+      <Section title="What’s in the air?" icon={<IconPie />}>
         <p className="text-xs leading-relaxed text-ink-muted">
           The source breakdown needs the live pollutant mix (NO₂, SO₂, dust…), which isn’t available
           right now. Switch to <strong>Pollutants</strong> to see the PM2.5 mass we do have.
@@ -1888,7 +1919,7 @@ function SourceLegend({ current, mode, hidden, onToggle, source }) {
   }
 
   return (
-    <Section title="What’s in this breath" icon={<IconPie />}>
+    <Section title="What’s in the air?" icon={<IconPie />}>
       <p className="mb-2 text-xs leading-relaxed text-ink-muted">
         By volume a breath is almost entirely clean air (~78% nitrogen, ~21% oxygen, ~1% argon).
         Everything leftover is pollution (well under 0.01% of the air).
@@ -1935,7 +1966,7 @@ function PollutantBreathSection({ current, hidden, onToggle, source }) {
   const total = entries.reduce((sum, p) => sum + p.value, 0);
   if (entries.length === 0 || total <= 0) {
     return (
-      <Section title="What’s in this breath" icon={<IconPie />}>
+      <Section title="What’s in the air?" icon={<IconPie />}>
         <p className="text-xs leading-relaxed text-ink-muted">
           Pollutant breakdown needs live species readings (O₃, NO₂, PM2.5, dust…), which aren’t
           available right now.
@@ -1952,7 +1983,7 @@ function PollutantBreathSection({ current, hidden, onToggle, source }) {
     .filter((p) => p.pct > 0);
 
   return (
-    <Section title="What’s in this breath" icon={<IconPie />}>
+    <Section title="What’s in the air?" icon={<IconPie />}>
       <p className="mb-2 text-xs leading-relaxed text-ink-muted">
         By volume a breath is almost entirely clean air (~78% nitrogen, ~21% oxygen, ~1% argon).
         Everything leftover is pollution (well under 0.01% of the air). The bar below splits the
@@ -2104,14 +2135,11 @@ function PollutantList({ current, source }) {
       title="Is this safe?"
       icon={<SafetyCount n={overWho} level={level} />}
     >
-      <p className="mb-2 rounded-md bg-cream/60 px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
-        Gases (O₃, NO₂, SO₂, CO) draw as soft haze; particles (PM2.5, PM10, dust) draw as orbs sized
-        by diameter. Counts track relative abundance of pollutant.
-      </p>
-      <p className="mb-3 text-[10px] leading-snug text-ink-muted">
-        Atmosphere view here is mass-based: each pollutant’s dots scale with its µg/m³ (softly
-        compressed so small species still show). It’s a visual balance, not literal molecule or
-        particle counts.
+      <p className="mb-3 rounded-md bg-cream/60 px-2.5 py-2 text-[11px] leading-snug text-ink">
+        Two different lines answer that. The WHO’s comes from the health research — the point where
+        your body starts paying for it. The US legal line sits a lot higher up. “Legal” and “safe”
+        aren’t the same thing, and plenty of air lands in the gap between them. Each pollutant below
+        is measured against both.
       </p>
       <ul className="grid gap-3">
         {POLLUTANTS.map((def) => {

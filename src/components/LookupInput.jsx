@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 /**
  * The lookup form. Style-2 editorial treatment: an underlined text field with a
@@ -17,6 +17,14 @@ export default function LookupInput({
   large = false, // landing-hero treatment: bigger type, labelled submit
 }) {
   const [value, setValue] = useState(defaultValue);
+
+  // Keep the field in sync with the loaded place — so navigating (e.g. the
+  // "Random" jump, or the auto-random landing) shows that place in the box,
+  // not the last thing typed. defaultValue only changes on a real navigation,
+  // so this never fights the user mid-type.
+  useEffect(() => {
+    setValue(defaultValue);
+  }, [defaultValue]);
 
   function handleSubmit(e) {
     e.preventDefault();

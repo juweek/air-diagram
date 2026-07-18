@@ -5,7 +5,7 @@
  * ──────────────────────────────────────────────────────────────────────────
  */
 const site = {
-  title: "What's in the Air",
+  title: 'Check your air quality',
   tagline:
     'Search a ZIP code or city to see its air, drawn particle by particle — then flip between the legal line and the health line.',
 
@@ -16,7 +16,7 @@ const site = {
   // The lookup lives at '/'; '/map' is the compiled counter-dataset — a US map
   // of every regulatory PM2.5 monitor, showing how sparse the network is.
   nav: [
-    { path: '/', label: "What's in the Air" },
+    { path: '/', label: 'Check your air quality' },
     { path: '/map', label: 'A glance at the US' },
   ],
 
