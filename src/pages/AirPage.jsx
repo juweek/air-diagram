@@ -220,7 +220,7 @@ export default function AirPage() {
       hasResult={hasResult}
       skyCapable={skyCapable}
       showSky={showSky}
-      onToggleSky={() => setShowSky((s) => !s)}
+      onSetSky={setShowSky}
       skyLabel={skyLabel}
       scenarioId={overlay?.id ?? (isUrlScenario ? query.toLowerCase() : null)}
       onScenario={(id) => {
@@ -462,6 +462,41 @@ function CanvasToggle({ pressed, onClick, title, label }) {
   );
 }
 
+/* ── SkyToggle: a two-state segmented control pinned to the field — Sky vs
+   Normal — so the current mode reads at a glance (the active side is the solid
+   ink chip). Replaces the old single press-toggle for sky mode. ────────────── */
+function SkyToggle({ sky, onSet, title }) {
+  const opts = [
+    { value: true, label: 'Sky' },
+    { value: false, label: 'Normal' },
+  ];
+  return (
+    <div
+      title={title}
+      role="group"
+      aria-label="Background: sky or normal"
+      className="flex overflow-hidden rounded-md border border-cream/60 shadow-sm backdrop-blur-sm"
+    >
+      {opts.map((o, i) => {
+        const active = sky === o.value;
+        return (
+          <button
+            key={o.label}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onSet(o.value)}
+            className={`label-caps px-2.5 py-1 transition-colors ${
+              i > 0 ? 'border-l border-cream/50' : ''
+            } ${active ? 'bg-ink/90 !text-cream' : 'bg-cream/90 !text-ink hover:!bg-cream'}`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── FieldLayerToggles: checkboxes under the Atmosphere canvas to show/hide
    layers. Particles / breath → modeled PM2.5 sources; Pollutants → API species.
    Same `hidden` set the sketch already reads. ─────────────────────────────── */
@@ -614,7 +649,7 @@ function FieldView({
   hasResult,
   skyCapable,
   showSky,
-  onToggleSky,
+  onSetSky,
   skyLabel,
   scenarioId,
   onScenario,
@@ -652,11 +687,10 @@ function FieldView({
         <P5Sketch sketch={airParticleSketch} data={sketchData} />
         {hasResult && skyCapable && (
           <div className="absolute right-2 top-2 z-10 flex max-w-[12rem] flex-col items-end gap-1">
-            <CanvasToggle
-              pressed={showSky}
-              onClick={onToggleSky}
+            <SkyToggle
+              sky={showSky}
+              onSet={onSetSky}
               title="Tint the background by the sun’s position and current weather at this place (dimmed so the particles stay readable)"
-              label="sky mode"
             />
             {showSky && skyLabel && (
               <span className="rounded-md bg-cream/90 px-1.5 py-0.5 text-[9px] leading-snug text-ink-muted shadow-sm backdrop-blur-sm">

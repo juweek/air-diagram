@@ -55,14 +55,14 @@ export default function Layout({ children }) {
 
       {/* Desktop: the two nav items float in a centered, fixed liquid-glass pill
          that stays pinned as the page scrolls underneath it. */}
-      <nav className="liquid-glass fixed left-1/2 top-4 z-50 hidden -translate-x-1/2 items-center gap-1 rounded-full px-2.5 py-2.5 sm:flex">
+      <nav className="liquid-glass fixed left-1/2 top-4 z-50 hidden -translate-x-1/2 items-center gap-1 rounded-full px-1 py-1 sm:flex">
         {site.nav.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
             end={item.path === '/'}
             className={({ isActive }) =>
-              `label-caps rounded-full px-4 py-2.5 transition-colors ${
+              `label-caps rounded-full px-4 py-1.5 !text-[11px] !font-bold transition-colors ${
                 isActive
                   ? '!bg-ink !text-cream'
                   : '!text-ink hover:!bg-ink/10 hover:!text-ink-bright'
@@ -80,7 +80,7 @@ export default function Layout({ children }) {
         href={site.support.url}
         target="_blank"
         rel="noreferrer"
-        className="liquid-glass label-caps fixed right-6 top-4 z-50 hidden items-center rounded-full px-5 py-2.5 !text-ink transition-colors hover:!text-ink-bright sm:flex"
+        className="liquid-glass label-caps fixed right-6 top-4 z-50 hidden items-center rounded-full px-5 py-2.5 !text-[11px] !font-bold !text-ink transition-colors hover:!text-ink-bright sm:flex"
       >
         {site.support.label}
       </a>

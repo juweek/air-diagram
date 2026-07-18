@@ -137,9 +137,9 @@
    keeps the light nav text legible over the dusk gradient. Safari lacks url()
    in backdrop-filter, so it degrades to a plain frost (still glassy). */
 .liquid-glass {
-  background: rgb(var(--ground-lift) / 0.28);
-  -webkit-backdrop-filter: blur(3px) saturate(180%);
-  backdrop-filter: url(#liquid-glass-distortion) blur(3px) saturate(180%);
+  background: rgb(var(--ground-lift) / 0.42);
+  -webkit-backdrop-filter: blur(7px) saturate(180%);
+  backdrop-filter: url(#liquid-glass-distortion) blur(7px) saturate(180%);
   border: 1px solid rgb(var(--sand) / 0.16);
   box-shadow:
     0 10px 34px rgb(0 0 0 / 0.38),
