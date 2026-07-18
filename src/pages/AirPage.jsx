@@ -104,11 +104,22 @@ const AQI_BANDS = [
 // matchMedia call could evaluate differently, especially in embeds).
 const DesktopContext = createContext(true);
 
+// Remembers each readout Section's open/closed state (keyed by title) across
+// navigations. The Readout remounts on every place change (fresh odometer +
+// focus), which would otherwise snap every section back to its default — this
+// store lives in AirPage, which does NOT remount, so a section the reader
+// collapsed (or opened) stays that way when they hit Random or search again.
+const SectionStore = createContext(null);
+
 export default function AirPage() {
   const { query: rawQuery } = useParams();
   const query = rawQuery ? decodeURIComponent(rawQuery) : '';
   const navigate = useNavigate();
   const state = useAsync(getByQuery, query);
+  // Plain mutable map { [title]: boolean }; stable identity for the lifetime of
+  // the page. Sections read their initial open state from here and write back
+  // on toggle (see Section). A ref, not state — persistence only, no re-render.
+  const sectionOpen = useRef({});
 
   const [view, setView] = useState('source'); // 'source' | 'pollutants' | 'breath'
   // Source keys the viewer has switched off in the "what's in a breath" list;
@@ -240,6 +251,7 @@ export default function AirPage() {
 
   return (
     <DesktopContext.Provider value={isDesktop}>
+      <SectionStore.Provider value={sectionOpen.current}>
       {/* ── Editorial hero: skyline first, then headline + thesis + search. ─ */}
       <section className="relative -mt-2 mb-8 pt-2 text-center">
         <HeroBars />
@@ -318,6 +330,7 @@ export default function AirPage() {
           </div>
         </GourmetMediaContainer>
       </div>
+      </SectionStore.Provider>
     </DesktopContext.Provider>
   );
 }
@@ -918,12 +931,23 @@ function Section({
   children,
 }) {
   const isDesktop = useContext(DesktopContext);
-  const [open, setOpen] = useState(isDesktop ? desktopOpen : defaultOpen);
+  const store = useContext(SectionStore);
+  // Persisted choice wins over the default; a section the reader has touched
+  // stays how they left it across navigations (see SectionStore in AirPage).
+  const [open, setOpen] = useState(() =>
+    store && title in store ? store[title] : isDesktop ? desktopOpen : defaultOpen
+  );
+  const toggle = () =>
+    setOpen((o) => {
+      const next = !o;
+      if (store) store[title] = next;
+      return next;
+    });
   return (
     <section className={`mt-6 rounded-lg border border-grid-strong ${SECTION_BG}`}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-expanded={open}
         className="flex w-full items-center justify-between gap-3 px-3.5 py-3.5 text-left sm:px-4"
       >
